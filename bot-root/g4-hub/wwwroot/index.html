@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+	<title>G4™ Engine API - Blueprint Designer</title>
+
+	<link rel="icon" href="./images/favicon.ico" />
+	<link href="./css/designer.css" rel="stylesheet">
+	<link href="./css/designer-blueprint-parameters.css" rel="stylesheet" id="theme-stylesheet" />
+	<link href="./css/designer-blueprint-spinner.css" rel="stylesheet" />
+	<link href="./css/designer-blueprint-layout.css" rel="stylesheet" />
+	<link href="./css/designer-blueprint-appearance.css" rel="stylesheet" />
+</head>
+
+<body class="sqd-theme-light">
+	<script type="text/javascript">
+		/**
+		 * Immediately invoked function to check if the URL query string contains ?mode=dark.
+		 * If so, the dark theme is applied automatically on page load.
+		 */
+		(function () {
+			// Parse the URL parameters from the current window location.
+			const urlParams = new URLSearchParams(window.location.search);
+
+			// Check if the 'mode' parameter is set to 'dark'. If not, exit the function.
+			if (urlParams.get('mode') !== 'dark') {
+				return;
+			}
+
+			// If 'mode' is 'dark', switch the theme by updating the stylesheet's 'href' attribute.
+			document
+				.getElementById('theme-stylesheet')
+				.setAttribute('href', './css/designer-blueprint-parameters-dark.css');
+		})();
+	</script>
+
+	<div id="loading-indicator">
+		<div id="spinner">
+			<span></span>
+			<span></span>
+			<span></span>
+			<span></span>
+			<span></span>
+		</div>
+	</div>
+
+	<div id="app">
+		<div id="designer--header" class="sqd-header">
+			<div class="column">
+				<!-- Button to toggle the theme -->
+				<div class="sqd-title">G4&trade; Engine API</div>
+				<div class="sqd-subtitle">Blueprint Designer for Automation Workflows</div>
+				<div class="sqd-text--tiny sqd-margin-top-03">Powered by <b><a href="https://github.com/nocode-js/sequential-workflow-designer" target="_blank">Sequential Workflow Designer</a></b></div>
+				<div class="sqd-text--tiny sqd-margin-top-03">Powered by <b><a href="https://github.com/g4-api/g4-services" target="_blank">G4&trade; Engine</a></b></div>
+			</div>
+			<div class="column sqd-card">
+				<div class="sqd-card--label">Actions Invoked</div>
+				<div id="designer--total-actions" class="sqd-card--content">0</div>
+			</div>
+			<div class="column sqd-card">
+				<div class="sqd-card--label">Avg. Action Time (sec.)</div>
+				<div id="designer--average-action-time" class="sqd-card--content">0.00</div>
+			</div>
+			<div class="column sqd-card">
+				<div class="sqd-card--label">Time Elapsed</div>
+				<div id="designer--timer" class="sqd-card--content">00:00:00</div>
+			</div>
+		</div>
+
+		<div id="designer" class="sqd-content"></div>
+
+		<div id="designer--bottom" class="sqd-footer">
+			<div>Column 1</div>
+			<div>Column 2</div>
+			<div>Column 3</div>
+		</div>
+
+	</div>
+
+	<script src="./js/metric-utilities.js"></script>
+	<script src="./js/utilities.js"></script>
+	<script src="./js/observer.js"></script>
+	<script src="./js/cli-factory.js"></script>
+	<script src="./js/signalr.min.js" integrity="" crossorigin="anonymous"></script>
+	<script src="./js/g4-client.js"></script>
+	<script src="./js/global.js"></script>
+	<script src="./js/custom-fields.js"></script>
+	<script src="./js/index.umd.js"></script>
+	<script src="./js/state-machine.js"></script>
+	<script src="./js/index.js"></script>
+
+	<script>
+		// Create a new instance of the G4Client class
+		const client = new G4Client();
+
+		/**
+		 * Waits for the '.sqd-control-bar' element to appear in the DOM within a specified timeout,
+		 * then adds custom control bar buttons for exporting, importing, starting, and stopping definitions.
+		 *
+		 * @param {string} selector - The CSS selector of the element to wait for.
+		 * @param {number} timeout  - The maximum time to wait for the element in milliseconds.
+		 */
+		Utilities.waitForElement('.sqd-control-bar', 5000)
+			.then((controlBar) => {
+				// SVG path data for the Export button icon
+				const exportSvg = "M960 608a32 32 0 0 0-32 32v288h-288a32 32 0 0 0 0 64h320a32 32 0 0 0 32-32V640a32 32 0 0 0-32-32zM512 928h-128a32 32 0 0 0 0 64h128a32 32 0 0 0 0-64zM278.72 937.28a32 32 0 0 0-34.88-6.72 29.76 29.76 0 0 0-10.56 6.72 32 32 0 0 0-6.72 10.56A32 32 0 0 0 224 960a32 32 0 0 0 54.72 22.72 37.12 37.12 0 0 0 6.72-10.56 30.08 30.08 0 0 0 0-24.32 29.76 29.76 0 0 0-6.72-10.56zM128 928H96v-288a32 32 0 0 0-64 0v320a32 32 0 0 0 32 32h64a32 32 0 0 0 0-64zM743.68 491.2a32 32 0 1 0 48.64 41.6l192-224a30.08 30.08 0 0 0 1.92-3.52 32 32 0 0 0 2.56-4.16v-2.24a32 32 0 0 0 0-5.12A32 32 0 0 0 992 288a32 32 0 0 0 0-4.8 32 32 0 0 0 0-5.12v-2.24a32 32 0 0 0-2.56-4.16 30.08 30.08 0 0 0-1.92-3.52l-192-224a32 32 0 0 0-48.64 41.6L890.56 256H480v480a32 32 0 0 0 64 0V320h346.56z";
+
+				// SVG path data for the Import button icon
+				const importSvg = "M960 608a32 32 0 0 0-32 32v288h-288a32 32 0 0 0 0 64h320a32 32 0 0 0 32-32V640a32 32 0 0 0-32-32zM512 928h-128a32 32 0 0 0 0 64h128a32 32 0 0 0 0-64zM278.72 937.28a32 32 0 0 0-34.88-6.72 29.76 29.76 0 0 0-10.56 6.72 32 32 0 0 0-6.72 10.56A32 32 0 0 0 224 960a32 32 0 0 0 54.72 22.72 37.12 37.12 0 0 0 6.72-10.56 30.08 30.08 0 0 0 0-24.32 29.76 29.76 0 0 0-6.72-10.56zM128 928H96v-288a32 32 0 0 0-64 0v320a32 32 0 0 0 32 32h64a32 32 0 0 0 0-64zM64 96h416v570.56l-171.2-146.88a32 32 0 0 0-41.6 48.64l224 192a32 32 0 0 0 4.8 2.88l2.56 1.6a30.08 30.08 0 0 0 23.36 0l2.24-1.6a32 32 0 0 0 4.8-2.88l224-192a32 32 0 0 0-41.6-48.64L544 666.56V64a32 32 0 0 0-32-32H64a32 32 0 0 0 0 64z";
+
+				// SVG path data for the Start button icon
+				const startSvg = "M10 10 L10 90 L90 50 Z";
+
+				// SVG path data for the Stop button icon
+				const stopSvg = "M10,10 L90,10 L90,90 L10,90 Z";
+
+				// SVG path data for the Reset button icon
+				const resetSvg = "M960 0v112.941c467.125 0 847.059 379.934 847.059 847.059 0 467.125-379.934 847.059-847.059 847.059-467.125 0-847.059-379.934-847.059-847.059 0-267.106 126.607-515.915 338.824-675.727v393.374h112.94V112.941H0v112.941h342.89C127.058 407.38 0 674.711 0 960c0 529.355 430.645 960 960 960s960-430.645 960-960S1489.355 0 960 0";
+
+				// SVG path data for the Dark Mode button icon
+				const darkModeSvg = "M18.44,34.68a18.22,18.22,0,0,1-2.94-.24,18.18,18.18,0,0,1-15-20.86A18.06,18.06,0,0,1,9.59.63,2.42,2.42,0,0,1,12.2.79a2.39,2.39,0,0,1,1,2.41L11.9,3.1l1.23.22A15.66,15.66,0,0,0,23.34,21h0a15.82,15.82,0,0,0,8.47.53A2.44,2.44,0,0,1,34.47,25,18.18,18.18,0,0,1,18.44,34.68ZM10.67,2.89a15.67,15.67,0,0,0-5,22.77A15.66,15.66,0,0,0,32.18,24a18.49,18.49,0,0,1-9.65-.64A18.18,18.18,0,0,1,10.67,2.89Z";
+
+				// Create a container div for the custom buttons
+				const customButtonsContainer = document.createElement("div");
+
+				// Set a custom data attribute for identification
+				customButtonsContainer.setAttribute('data-g4-role', 'custom-buttons');
+
+				/**
+				 * Creates and configures the Dark Mode button.
+				 */
+				CustomG4Fields.newControlBarButton({
+					classList: ['sqd-control-bar-button'],
+					container: customButtonsContainer,
+					icon: darkModeSvg,
+					pathClassList: ['sqd-icon-path'],
+					svgClassList: ['sqd-control-bar-button-icon'],
+					title: 'Dark Mode',
+					viewBox: '0 0 35 35',
+					onClick: () => {
+						Utilities.switchMode();
+					}
+				});
+
+				/**
+				 * Creates and configures the Reset Definition button.
+				 */
+				CustomG4Fields.newControlBarButton({
+					classList: ['sqd-control-bar-button'],
+					container: customButtonsContainer,
+					icon: resetSvg,
+					pathClassList: ['sqd-icon-path'],
+					svgClassList: ['sqd-control-bar-button-icon'],
+					title: 'Reset Definition',
+					viewBox: '0 0 1920 1920',
+					onClick: () => {
+						// Indicate that the automation is no longer running
+						_stateMachine.isRunning = false;
+
+						// Release the designer from read-only mode
+						_designer.setIsReadonly(false);
+					}
+				});
+
+				/**
+				 * Creates and configures the Export Definition button.
+				 */
+				CustomG4Fields.newControlBarButton({
+					classList: ['sqd-control-bar-button'],
+					container: customButtonsContainer,
+					icon: exportSvg,
+					pathClassList: ['sqd-icon-path'],
+					svgClassList: ['sqd-control-bar-button-icon'],
+					title: 'Export Definition',
+					viewBox: '0 0 1024 1024',
+					onClick: exportDefinition
+				});
+
+				/**
+				 * Creates and configures the Import Definition button.
+				 */
+				CustomG4Fields.newControlBarButton({
+					classList: ['sqd-control-bar-button'],
+					container: customButtonsContainer,
+					icon: importSvg,
+					pathClassList: ['sqd-icon-path'],
+					svgClassList: ['sqd-control-bar-button-icon'],
+					title: 'Import Definition',
+					viewBox: '0 0 1024 1024',
+					onClick: newImportModal
+				});
+
+				/**
+				 * Creates and configures the Stop Definition button.
+				 */
+				CustomG4Fields.newControlBarButton({
+					classList: ['sqd-control-bar-button'],
+					container: customButtonsContainer,
+					icon: stopSvg,
+					pathClassList: ['sqd-icon-path', 'sqd-stop-icon-path'],
+					svgClassList: ['sqd-control-bar-button-icon'],
+					title: 'Stop Definition',
+					viewBox: '0 0 100 100',
+					onClick: () => {
+						console.log('Stop Definition');
+					}
+				});
+
+				/**
+				 * Creates and configures the Start Definition button.
+				 *
+				 * Assumes that the `startDefinition` function is defined elsewhere in the script.
+				 */
+				CustomG4Fields.newControlBarButton({
+					classList: ['sqd-control-bar-button'],
+					container: customButtonsContainer,
+					icon: startSvg,
+					pathClassList: ['sqd-icon-path', 'sqd-start-icon-path'],
+					svgClassList: ['sqd-control-bar-button-icon'],
+					title: 'Start Definition',
+					viewBox: '0 0 100 100',
+					// Event handler for starting the definition process
+					onClick: startDefinition
+				});
+
+				// Append the container with custom buttons to the existing control bar
+				controlBar.appendChild(customButtonsContainer);
+			})
+			.catch((error) => {
+				// Handle any errors that occur while waiting for the element
+				console.error(`Error waiting for element: ${error.message}`);
+			});
+	</script>
+</body>
+
+</html>

@@ -1,0 +1,742 @@
+{
+    "required": [
+        "driverParameters",
+        "stages"
+    ],
+    "type": "object",
+    "properties": {
+        "authentication": {
+            "$ref": "#/$defs/AuthenticationModel"
+        },
+        "automationSession": {
+            "type": "string",
+            "nullable": true
+        },
+        "dataSource": {
+            "$ref": "#/$defs/G4DataProviderModel"
+        },
+        "driverParameters": {
+            "type": "object",
+            "additionalProperties": {
+                "nullable": true
+            }
+        },
+        "driverSession": {
+            "type": "string",
+            "nullable": true
+        },
+        "groupId": {
+            "type": "string",
+            "nullable": true
+        },
+        "iteration": {
+            "type": "integer",
+            "format": "int32"
+        },
+        "reference": {
+            "$ref": "#/$defs/G4AutomationReferenceModel"
+        },
+        "settings": {
+            "$ref": "#/$defs/G4SettingsModel"
+        },
+        "stages": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/G4StageModel"
+            }
+        }
+    },
+    "additionalProperties": false,
+    "$schema": "./schema-draft.json",
+    "$defs": {
+        "AuthenticationModel": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "token": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "username": {
+                    "type": "string",
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4DataProviderModel": {
+            "type": "object",
+            "properties": {
+                "authentication": {
+                    "$ref": "#/$defs/AuthenticationModel"
+                },
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "nullable": true
+                    },
+                    "nullable": true
+                },
+                "filter": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "forEntity": {
+                    "type": "boolean"
+                },
+                "repository": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "source": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "type": {
+                    "type": "string",
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4AutomationReferenceModel": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "name": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "groupId": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "id": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "iteration": {
+                    "type": "integer",
+                    "format": "int32"
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4SettingsModel": {
+            "type": "object",
+            "properties": {
+                "automationSettings": {
+                    "$ref": "#/$defs/AutomationSettingsModel"
+                },
+                "environmentsSettings": {
+                    "$ref": "#/$defs/EnvironmentsSettingsModel"
+                },
+                "exceptionsSettings": {
+                    "$ref": "#/$defs/ExceptionsSettingsModel"
+                },
+                "queueManagerSettings": {
+                    "$ref": "#/$defs/QueueManagerSettingsModel"
+                },
+                "performancePointsSettings": {
+                    "$ref": "#/$defs/PerformancePointsSettingsModel"
+                },
+                "pluginsSettings": {
+                    "$ref": "#/$defs/PluginsSettingsModel"
+                },
+                "screenshotsSettings": {
+                    "$ref": "#/$defs/ScreenshotsSettingsModel"
+                }
+            },
+            "additionalProperties": false
+        },
+        "AutomationSettingsModel": {
+            "type": "object",
+            "properties": {
+                "loadTimeout": {
+                    "type": "integer",
+                    "format": "int32"
+                },
+                "maxParallel": {
+                    "type": "integer",
+                    "format": "int32"
+                },
+                "returnFlatResponse": {
+                    "type": "boolean"
+                },
+                "returnStructuredResponse": {
+                    "type": "boolean"
+                },
+                "searchTimeout": {
+                    "type": "integer",
+                    "format": "int32"
+                }
+            },
+            "additionalProperties": false
+        },
+        "EnvironmentsSettingsModel": {
+            "type": "object",
+            "properties": {
+                "defaultEnvironment": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "environmentVariables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/ApplicationParametersModel"
+                    },
+                    "nullable": true
+                },
+                "returnEnvironment": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false
+        },
+        "ApplicationParametersModel": {
+            "type": "object",
+            "properties": {
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "nullable": true
+                    },
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "ExceptionsSettingsModel": {
+            "type": "object",
+            "properties": {
+                "returnExceptions": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false
+        },
+        "QueueManagerSettingsModel": {
+            "type": "object",
+            "properties": {
+                "properties": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "nullable": true
+                    },
+                    "nullable": true
+                },
+                "type": {
+                    "type": "string",
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "PerformancePointsSettingsModel": {
+            "type": "object",
+            "properties": {
+                "returnPerformancePoints": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false
+        },
+        "PluginsSettingsModel": {
+            "type": "object",
+            "properties": {
+                "externalRepositories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/G4ExternalRepositoryModel"
+                    },
+                    "nullable": true
+                },
+                "forceRuleReference": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4ExternalRepositoryModel": {
+            "required": [
+                "name",
+                "url",
+                "version"
+            ],
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "nullable": true
+                    },
+                    "nullable": true
+                },
+                "credentials": {
+                    "$ref": "#/$defs/AuthenticationModel"
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "nullable": true
+                },
+                "name": {
+                    "maxLength": 155,
+                    "minLength": 0,
+                    "type": "string"
+                },
+                "timeout": {
+                    "type": "number",
+                    "format": "double"
+                },
+                "url": {
+                    "minLength": 1,
+                    "type": "string",
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "format": "uri"
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^{{.*}}$"
+                        }
+                    ]
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int32"
+                }
+            },
+            "additionalProperties": false
+        },
+        "ScreenshotsSettingsModel": {
+            "type": "object",
+            "properties": {
+                "convertToBase64": {
+                    "type": "boolean"
+                },
+                "onExceptionOnly": {
+                    "type": "boolean"
+                },
+                "outputFolder": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "returnScreenshots": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4StageModel": {
+            "required": [
+                "jobs"
+            ],
+            "type": "object",
+            "properties": {
+                "automationSession": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "condition": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "nullable": true
+                },
+                "description": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "driverParameters": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "nullable": true
+                    },
+                    "nullable": true
+                },
+                "driverSession": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "failOnException": {
+                    "type": "boolean"
+                },
+                "ignoredExceptions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "nullable": true
+                },
+                "jobs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/G4JobModel"
+                    }
+                },
+                "name": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "performancePoint": {
+                    "$ref": "#/$defs/G4PerformancePointModelBase"
+                },
+                "reference": {
+                    "$ref": "#/$defs/G4StageReferenceModel"
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4JobModel": {
+            "required": [
+                "rules"
+            ],
+            "type": "object",
+            "properties": {
+                "automationSession": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "condition": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "nullable": true
+                },
+                "driverParameters": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "nullable": true
+                    },
+                    "nullable": true
+                },
+                "driverSession": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "ignoredExceptions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "nullable": true
+                },
+                "outcome": {
+                    "$ref": "#/$defs/G4PhaseOutcomeModel"
+                },
+                "performancePoint": {
+                    "$ref": "#/$defs/G4PerformancePointModelBase"
+                },
+                "reference": {
+                    "$ref": "#/$defs/G4JobReferenceModel"
+                },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/G4RuleModelBase"
+                    }
+                },
+                "stopOnError": {
+                    "type": "boolean"
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4PhaseOutcomeModel": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "outcome": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "phase": {
+                    "type": "string",
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4PerformancePointModelBase": {
+            "type": "object",
+            "properties": {
+                "driverSession": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "end": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "setupDelegationTime": {
+                    "type": "number",
+                    "format": "double"
+                },
+                "setupTime": {
+                    "type": "number",
+                    "format": "double"
+                },
+                "start": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "teardownDelegationTime": {
+                    "type": "number",
+                    "format": "double"
+                },
+                "teardownTime": {
+                    "type": "number",
+                    "format": "double"
+                },
+                "runTime": {
+                    "type": "number",
+                    "format": "double"
+                },
+                "timeouts": {
+                    "type": "number",
+                    "format": "double"
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4JobReferenceModel": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "name": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "id": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "stageReference": {
+                    "$ref": "#/$defs/G4StageReferenceModel"
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4StageReferenceModel": {
+            "type": "object",
+            "properties": {
+                "automationReference": {
+                    "$ref": "#/$defs/G4AutomationReferenceModel"
+                },
+                "description": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "id": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "name": {
+                    "type": "string",
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4RuleModelBase": {
+            "required": [
+                "pluginName"
+            ],
+            "type": "object",
+            "properties": {
+                "$type": {
+                    "type": "string",
+                    "nullable": false
+                },
+                "argument": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "nullable": true
+                    },
+                    "nullable": true
+                },
+                "dataCollector": {
+                    "$ref": "#/$defs/G4DataProviderModel"
+                },
+                "iteration": {
+                    "type": "integer",
+                    "format": "int32"
+                },
+                "locator": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "onAttribute": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "onElement": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "pluginName": {
+                    "minLength": 1,
+                    "type": "string"
+                },
+                "reference": {
+                    "$ref": "#/$defs/G4PluginReferenceModel"
+                },
+                "regularExpression": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/G4RuleModelBase"
+                    },
+                    "nullable": true
+                },
+                "transformers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/TransformerRuleModel"
+                    },
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "G4PluginReferenceModel": {
+            "type": "object",
+            "properties": {
+                "alias": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "description": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "id": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "iteration": {
+                    "type": "integer",
+                    "format": "int32"
+                },
+                "jobReference": {
+                    "$ref": "#/$defs/G4JobReferenceModel"
+                },
+                "name": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "parentReference": {
+                    "$ref": "#/$defs/G4PluginReferenceModel"
+                },
+                "type": {
+                    "type": "string",
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "TransformerRuleModel": {
+            "required": [
+                "pluginName"
+            ],
+            "type": "object",
+            "properties": {
+                "argument": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "nullable": true
+                    },
+                    "nullable": true
+                },
+                "dataCollector": {
+                    "$ref": "#/$defs/G4DataProviderModel"
+                },
+                "iteration": {
+                    "type": "integer",
+                    "format": "int32"
+                },
+                "locator": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "onAttribute": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "onElement": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "pluginName": {
+                    "minLength": 1,
+                    "type": "string"
+                },
+                "reference": {
+                    "$ref": "#/$defs/G4PluginReferenceModel"
+                },
+                "regularExpression": {
+                    "type": "string",
+                    "nullable": true
+                },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/G4RuleModelBase"
+                    },
+                    "nullable": true
+                },
+                "transformers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/TransformerRuleModel"
+                    },
+                    "nullable": true
+                },
+                "dataType": {
+                    "type": "string",
+                    "nullable": true
+                }
+            },
+            "additionalProperties": false
+        }
+    },
+    "title": "G4AutomationModel"
+}

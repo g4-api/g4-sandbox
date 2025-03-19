@@ -1,0 +1,10 @@
+[node]
+detect-drivers = false
+
+[relay]
+url = "http://localhost:9515"
+status-endpoint = "/status"
+protocol-version = "HTTP/1.1"
+configs = [
+  "10", "{\"browserName\": \"MicrosoftEdge\", \"platformName\": \"windows\"}"
+]

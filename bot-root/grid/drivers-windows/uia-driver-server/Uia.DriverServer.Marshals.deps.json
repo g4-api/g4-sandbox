@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "Uia.DriverServer.Marshals/1.0.0": {
+        "runtime": {
+          "Uia.DriverServer.Marshals.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Uia.DriverServer.Marshals/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
