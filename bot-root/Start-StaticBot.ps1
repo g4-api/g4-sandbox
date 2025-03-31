@@ -1,4 +1,4 @@
-<#
+<# 
 .SYNOPSIS
     Periodically processes an 'automation.json' file by encoding its content in Base64,
     sending it to a remote endpoint, and saving both the responses and any errors.
@@ -45,18 +45,105 @@
     Switch to run the script inside a Docker container. When specified, the script will launch a Docker container
     using the given parameters and then exit.
 
+.PARAMETER EnvironmentVariables
+    An array of strings in key=value format to define additional environment variables.
+    These values will be processed along with variables loaded from the .env file.
+    
 .EXAMPLE
-    .\LoopScript.ps1 -BotVolume "E:\Garbage\bot-volume" -BotName "demo-bot" -DriverBinaries "http://host.k8s.internal" -HubUri "http://host.docker.internal:9944" -IntervalTime 120 -Token "your_token"
+    .\LoopScript.ps1 -BotVolume "E:\Garbage\bot-volume" -BotName "demo-bot" -DriverBinaries "http://host.k8s.internal" `
+       -HubUri "http://host.docker.internal:9944" -IntervalTime 120 -Token "your_token" -Docker `
+       -EnvironmentVariables @("MY_VAR=Value1", "ANOTHER_VAR=Value2")
 #>
 param (
-    [string]$BotVolume,
-    [string]$BotName,
-    [string]$DriverBinaries,
-    [string]$HubUri,
-    [string]$IntervalTime,
-    [string]$Token,
-    [switch]$Docker
+    [CmdletBinding()]
+    [Parameter(Mandatory = $true)] [string]$BotVolume,
+    [Parameter(Mandatory = $true)] [string]$BotName,
+    [Parameter(Mandatory = $true)] [string]$DriverBinaries,
+    [Parameter(Mandatory = $true)] [string]$HubUri,
+    [Parameter(Mandatory = $true)] [string]$IntervalTime,
+    [Parameter(Mandatory = $true)] [string]$Token,
+    [Parameter(Mandatory = $false)][switch]$Docker
 )
+
+function Import-EnvironmentVariablesFile {
+    <#
+    .SYNOPSIS
+        Imports environment variables from an environment file and additional parameters into the current session.
+
+    .DESCRIPTION
+        This function reads an environment file (each line formatted as KEY=value) and splits each line on the first "=".
+        In addition, it accepts an array of additional environment variable strings (AdditionalEnvironmentVariables) in key=value format.
+        Both sets of key-value pairs are imported into the current session's environment.
+        Any keys specified in SkipNames are skipped.
+
+    .PARAMETER EnvironmentFilePath
+        The full path to the environment file. Defaults to ".env" in the script's directory.
+
+    .PARAMETER SkipNames
+        An array of environment variable names that should not be imported from the file or the additional parameters.
+
+    .PARAMETER AdditionalEnvironmentVariables
+        An array of additional environment variable strings in key=value format.
+        
+    .EXAMPLE
+        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME" `
+            -AdditionalEnvironmentVariables @("MY_VAR=Value1", "OTHER_VAR=Value2")
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$EnvironmentFilePath = (Join-Path $PSScriptRoot ".env"),
+        
+        [Parameter(Mandatory = $false)]
+        [string[]]$SkipNames = @(),
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$AdditionalEnvironmentVariables = @()
+    )
+
+    # Process the environment file if it exists.
+    if (Test-Path $EnvironmentFilePath) {
+        Get-Content $EnvironmentFilePath -Force -Encoding UTF8 | ForEach-Object {
+            if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
+                return
+            }
+            $parts = $_.Split('=', 2)
+            if ($parts.Length -ne 2) {
+                return
+            }
+            $key   = $parts[0].Trim()
+            $value = $parts[1].Trim()
+            if ($SkipNames -contains $key) {
+                Write-Verbose "Skipping environment variable '$key' as it is in the skip list."
+                return
+            }
+            Set-Item -Path "Env:$key" -Value $value
+            Write-Verbose "Set environment variable '$key' with value '$value'"
+        }
+    }
+    else {
+        Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
+    }
+
+    # Process additional environment variables passed via the parameter.
+    $AdditionalEnvironmentVariables | ForEach-Object {
+        if ([string]::IsNullOrWhiteSpace($_.Trim())) {
+            return
+        }
+        $parts = $_.Split('=', 2)
+        if ($parts.Length -ne 2) {
+            return
+        }
+        $key   = $parts[0].Trim()
+        $value = $parts[1].Trim()
+        if ($SkipNames -contains $key) {
+            Write-Verbose "Skipping environment variable '$key' as it is in the skip list."
+            return
+        }
+        Set-Item -Path "Env:$key" -Value $value
+        Write-Verbose "Set additional environment variable '$key' with value '$value'"
+    }
+}
 
 function Wait-Interval {
     [CmdletBinding()]
@@ -103,7 +190,13 @@ if ($Docker) {
         # Launch the Docker container:
         # - Mount the BotVolume to /bots in the container.
         # - Pass the required environment variables to configure the bot.
-        docker run -d -v "$($BotVolume):/bots" -e BOT_NAME="$($BotName)" -e DRIVER_BINARIES="$($DriverBinaries)" -e HUB_URI="$($HubUri)" -e INTERVAL_TIME="$($IntervalTime)" -e TOKEN="$($Token)" --name "$($BotName)-$([guid]::NewGuid())" g4-static-bot:latest
+        docker run -d -v "$($BotVolume):/bots" `
+            -e BOT_NAME="$($BotName)" `
+            -e DRIVER_BINARIES="$($DriverBinaries)" `
+            -e HUB_URI="$($HubUri)" `
+            -e INTERVAL_TIME="$($IntervalTime)" `
+            -e TOKEN="$($Token)" `
+            --name "$($BotName)-$([guid]::NewGuid())" g4-static-bot:latest
         
         Write-Host "Docker container '$($BotName)' started successfully."
         Exit 0
@@ -115,6 +208,14 @@ if ($Docker) {
     }
 }
 
+try {
+    Write-Verbose "Setting Environment Parameters"
+    Import-EnvironmentVariablesFile -Verbose
+}
+catch {
+    Write-Error "Failed to set environment parameters: $_"
+}
+
 # Construct the full request URL by trimming any trailing slash from $HubUri and appending the endpoint path.
 $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
 
@@ -122,7 +223,7 @@ $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
 $outputDirectory = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
 
 Write-Host
-Write-Host "Starting main loop. Press [Ctrl] + [C] to stop the script."
+Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
 
 # Build the complete path to the bot's automation file:
 # 1. Combine $BotVolume and $BotName to form the bot directory.
@@ -153,7 +254,7 @@ while ($true) {
         $errorsPath = [System.IO.Path]::Combine($BotVolume, $BotName, "errors", "$($BotName)-$($session).json")
         
         # Read the entire content of 'automation.json' as raw text.
-        $botFileContent = Get-Content $botFilePath -Raw
+        $botFileContent = [System.IO.File]::ReadAllText($botFilePath, [System.Text.Encoding]::UTF8)
 
         # Parse the JSON text into an object for modification.
         $botFileJson = ConvertFrom-Json $botFileContent
@@ -178,13 +279,19 @@ while ($true) {
     }
     catch {
         # If an error occurs, display a message and log the error details to the designated errors file.
-        Write-Host "An error occurred. Check $errorsPath for details."
+        Write-Error "An error occurred. Check $errorsPath for details."
         "Error: $_" | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
     }
     finally {
-        # Save the response from the remote endpoint (if any) to the output file for record-keeping.
-        Write-Host "Saving response to $outputFilePath."
-        $response | ConvertTo-Json -Depth 30 -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
+        try {
+            if($null -ne $outputFilePath) {
+                $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
+                Write-Verbose "Response successfully saved to: $outputFilePath"   
+            }
+        }
+        catch {
+            Write-Error "Failed to save response to: $outputFilePath. Error details: $_"
+        }
     }
 
     # Wait for the specified interval before starting the next iteration.

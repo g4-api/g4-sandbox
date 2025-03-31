@@ -1,5 +1,5 @@
 param(
-    [string]$HubUri   = "http://localhost:4444/wd/hub",
+    [string]$HubUri   = "http://host.k8s.internal/wd/hub",
     [int]   $NodePort = 5554
 )
 
@@ -42,7 +42,10 @@ function Join-Paths {
 }
 
 # Determine if the OS platform is Linux
-$isLinuxOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux)
+$isLinuxOs = $false
+if ([Environment]::OSVersion.Platform -eq [System.PlatformID]::Unix) {
+    $isLinuxOs = $true
+}
 
 # Define base directory (the directory containing the script)
 $baseFolder = $PSScriptRoot
@@ -63,7 +66,6 @@ if ($isLinuxOs) {
 
 # Build the path to the dotnet executable (dotnet[.exe] or similar) and other executables
 $dotnetExecutable       = Join-Paths @($dotnetFolder, "dotnet")
-$g4HubExecutable        = Join-Paths @($g4HubFolder, "G4.Services.Hub.dll")
 $javaExecutable         = Join-Paths @($javaFolder, "bin", "java")
 $seleniumExecutable     = Join-Paths @($binariesFolder, "selenium-server.jar")
 $uiaDriverExecutable    = Join-Paths @($uiaDriverFolder, "Uia.DriverServer.dll")

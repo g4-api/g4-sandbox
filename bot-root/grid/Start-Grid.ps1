@@ -1,5 +1,5 @@
 param(
-    [string]$HubUri = "http://localhost:4444/wd/hub"
+    [string]$HubUri = "http://host.k8s.internal:4444/wd/hub"
 )
 
 function Join-Paths {
@@ -41,7 +41,10 @@ function Join-Paths {
 }
 
 # Determine if the OS platform is Linux
-$isLinuxOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux)
+$isLinuxOs = $false
+if ([Environment]::OSVersion.Platform -eq [System.PlatformID]::Unix) {
+    $isLinuxOs = $true
+}
 
 # Define base directory (the directory containing the script)
 $baseFolder = $PSScriptRoot

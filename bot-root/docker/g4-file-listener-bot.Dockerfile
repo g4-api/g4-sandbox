@@ -1,0 +1,47 @@
+# Use a lightweight official Ubuntu as the base image
+FROM ubuntu:24.04
+
+# Prevent interactive dialogs during package install
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install prerequisites
+RUN apt-get update && \
+    apt-get install -y wget apt-transport-https software-properties-common gnupg && \
+    rm -rf /var/lib/apt/lists/*
+
+# Download and install Microsoft repository GPG keys
+RUN wget -q https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb && \
+    dpkg -i packages-microsoft-prod.deb && \
+    rm packages-microsoft-prod.deb
+
+# Update package lists and install PowerShell
+RUN apt-get update && \
+    apt-get install -y powershell && \
+    rm -rf /var/lib/apt/lists/*
+
+# Echo the variables in the desired format during build
+RUN echo "BOT_NAME: ${BOT_NAME}" && \
+    echo "DRIVER_BINARIES: ${DRIVER_BINARIES}" && \
+    echo "HUB_URI: ${HUB_URI}" && \
+    echo "INTERVAL_TIME: ${INTERVAL_TIME}" && \
+    echo "TOKEN: ${TOKEN}"
+
+# Create the /bots directory and ensure it has read/write permissions
+RUN mkdir -p /bots && chmod 777 /bots
+
+# Create a directory for your script
+WORKDIR /app
+
+# Copy the PowerShell script and .env file into the container
+COPY .env /app/.env
+COPY Start-FileListenerBot.ps1 /app/Start-FileListenerBot.ps1
+
+# Make script executable (optional good practice)
+RUN chmod +x /app/Start-FileListenerBot.ps1
+
+# Pass four parameters to the script:
+#   1) The bot volume location (/bot)
+#   2) BotName from environment variable
+#   3) HubUri from environment variable
+#   4) IntervalTime from environment variable
+CMD ["pwsh", "-Command", "./Start-FileListenerBot.ps1 /bots $env:BOT_NAME $env:DRIVER_BINARIES $env:HUB_URI $env:INTERVAL_TIME $env:TOKEN"]

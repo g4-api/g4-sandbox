@@ -10,7 +10,7 @@
         "dependencies": {
           "G4.Services.Hub.Api.V4": "1.0.0",
           "Microsoft.VisualStudio.Azure.Containers.Tools.Targets": "1.21.2",
-          "Swashbuckle.AspNetCore": "7.3.1"
+          "Swashbuckle.AspNetCore": "8.0.0"
         },
         "runtime": {
           "G4.Services.Hub.dll": {}
@@ -43,7 +43,7 @@
       },
       "G4.Abstraction.WebDriver/2025.3.7.16": {
         "dependencies": {
-          "G4.Cache": "2025.3.7.34",
+          "G4.Cache": "2025.3.28.36",
           "G4.WebDriver": "2025.3.7.10",
           "G4.WebDriver.Remote.Android": "2025.3.7.10",
           "G4.WebDriver.Remote.Appium": "2025.3.7.10",
@@ -63,11 +63,11 @@
           }
         }
       },
-      "G4.Api/2025.3.11.34": {
+      "G4.Api/2025.3.29.35": {
         "dependencies": {
-          "G4.Plugins": "2025.3.7.34",
-          "G4.Plugins.Common": "2025.3.11.106",
-          "G4.Plugins.Ui": "2025.3.11.106"
+          "G4.Plugins": "2025.3.28.36",
+          "G4.Plugins.Common": "2025.3.28.107",
+          "G4.Plugins.Ui": "2025.3.28.107"
         },
         "runtime": {
           "lib/net8.0/G4.Api.dll": {
@@ -76,9 +76,9 @@
           }
         }
       },
-      "G4.Attributes/2025.3.7.34": {
+      "G4.Attributes/2025.3.28.36": {
         "dependencies": {
-          "G4.Models": "2025.3.7.34",
+          "G4.Models": "2025.3.28.36",
           "HtmlAgilityPack": "1.11.74",
           "LiteDB": "5.0.17"
         },
@@ -89,9 +89,9 @@
           }
         }
       },
-      "G4.Cache/2025.3.7.34": {
+      "G4.Cache/2025.3.28.36": {
         "dependencies": {
-          "G4.Extensions": "2025.3.7.34",
+          "G4.Extensions": "2025.3.28.36",
           "G4.Settings": "1.0.0",
           "HtmlAgilityPack": "1.11.74"
         },
@@ -102,7 +102,7 @@
           }
         }
       },
-      "G4.Converters/2025.3.7.34": {
+      "G4.Converters/2025.3.28.36": {
         "runtime": {
           "lib/net8.0/G4.Converters.dll": {
             "assemblyVersion": "8.0.0.0",
@@ -110,7 +110,7 @@
           }
         }
       },
-      "G4.Exceptions/2025.3.7.34": {
+      "G4.Exceptions/2025.3.28.36": {
         "runtime": {
           "lib/net8.0/G4.Exceptions.dll": {
             "assemblyVersion": "8.0.0.0",
@@ -118,13 +118,13 @@
           }
         }
       },
-      "G4.Extensions/2025.3.7.34": {
+      "G4.Extensions/2025.3.28.36": {
         "dependencies": {
           "G4.Abstraction.Cli": "2025.3.7.16",
           "G4.Abstraction.Logging": "2025.3.7.16",
-          "G4.Attributes": "2025.3.7.34",
-          "G4.Converters": "2025.3.7.34",
-          "G4.Models": "2025.3.7.34",
+          "G4.Attributes": "2025.3.28.36",
+          "G4.Converters": "2025.3.28.36",
+          "G4.Models": "2025.3.28.36",
           "HtmlAgilityPack": "1.11.74",
           "Newtonsoft.Json": "13.0.3"
         },
@@ -135,9 +135,9 @@
           }
         }
       },
-      "G4.Models/2025.3.7.34": {
+      "G4.Models/2025.3.28.36": {
         "dependencies": {
-          "G4.Exceptions": "2025.3.7.34",
+          "G4.Exceptions": "2025.3.28.36",
           "G4.WebDriver": "2025.3.7.10",
           "HtmlAgilityPack": "1.11.74"
         },
@@ -148,13 +148,13 @@
           }
         }
       },
-      "G4.Plugins/2025.3.7.34": {
+      "G4.Plugins/2025.3.28.36": {
         "dependencies": {
           "G4.Abstraction.Cli": "2025.3.7.16",
           "G4.Abstraction.Logging": "2025.3.7.16",
           "G4.Abstraction.WebDriver": "2025.3.7.16",
-          "G4.Cache": "2025.3.7.34",
-          "G4.Models": "2025.3.7.34",
+          "G4.Cache": "2025.3.28.36",
+          "G4.Models": "2025.3.28.36",
           "G4.Settings": "1.0.0",
           "HtmlAgilityPack": "1.11.74"
         },
@@ -165,11 +165,11 @@
           }
         }
       },
-      "G4.Plugins.Common/2025.3.11.106": {
+      "G4.Plugins.Common/2025.3.28.107": {
         "dependencies": {
-          "G4.Converters": "2025.3.7.34",
-          "G4.Extensions": "2025.3.7.34",
-          "G4.Plugins": "2025.3.7.34"
+          "G4.Converters": "2025.3.28.36",
+          "G4.Extensions": "2025.3.28.36",
+          "G4.Plugins": "2025.3.28.36"
         },
         "runtime": {
           "lib/net8.0/G4.Plugins.Common.dll": {
@@ -178,10 +178,10 @@
           }
         }
       },
-      "G4.Plugins.Ui/2025.3.11.106": {
+      "G4.Plugins.Ui/2025.3.28.107": {
         "dependencies": {
-          "G4.Converters": "2025.3.7.34",
-          "G4.Plugins.Common": "2025.3.11.106"
+          "G4.Converters": "2025.3.28.36",
+          "G4.Plugins.Common": "2025.3.28.107"
         },
         "runtime": {
           "lib/net8.0/G4.Plugins.Ui.dll": {
@@ -628,11 +628,11 @@
         }
       },
       "Microsoft.Extensions.Primitives/8.0.0": {},
-      "Microsoft.OpenApi/1.6.22": {
+      "Microsoft.OpenApi/1.6.23": {
         "runtime": {
           "lib/netstandard2.0/Microsoft.OpenApi.dll": {
-            "assemblyVersion": "1.6.22.0",
-            "fileVersion": "1.6.22.0"
+            "assemblyVersion": "1.6.23.0",
+            "fileVersion": "1.6.23.0"
           }
         }
       },
@@ -645,52 +645,52 @@
           }
         }
       },
-      "Swashbuckle.AspNetCore/7.3.1": {
+      "Swashbuckle.AspNetCore/8.0.0": {
         "dependencies": {
           "Microsoft.Extensions.ApiDescription.Server": "6.0.5",
-          "Swashbuckle.AspNetCore.Swagger": "7.3.1",
-          "Swashbuckle.AspNetCore.SwaggerGen": "7.3.1",
-          "Swashbuckle.AspNetCore.SwaggerUI": "7.3.1"
+          "Swashbuckle.AspNetCore.Swagger": "8.0.0",
+          "Swashbuckle.AspNetCore.SwaggerGen": "8.0.0",
+          "Swashbuckle.AspNetCore.SwaggerUI": "8.0.0"
         }
       },
-      "Swashbuckle.AspNetCore.Annotations/7.3.1": {
+      "Swashbuckle.AspNetCore.Annotations/8.0.0": {
         "dependencies": {
-          "Swashbuckle.AspNetCore.SwaggerGen": "7.3.1"
+          "Swashbuckle.AspNetCore.SwaggerGen": "8.0.0"
         },
         "runtime": {
           "lib/net8.0/Swashbuckle.AspNetCore.Annotations.dll": {
-            "assemblyVersion": "7.3.1.0",
-            "fileVersion": "7.3.1.1111"
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.0.1197"
           }
         }
       },
-      "Swashbuckle.AspNetCore.Swagger/7.3.1": {
+      "Swashbuckle.AspNetCore.Swagger/8.0.0": {
         "dependencies": {
-          "Microsoft.OpenApi": "1.6.22"
+          "Microsoft.OpenApi": "1.6.23"
         },
         "runtime": {
           "lib/net8.0/Swashbuckle.AspNetCore.Swagger.dll": {
-            "assemblyVersion": "7.3.1.0",
-            "fileVersion": "7.3.1.1111"
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.0.1197"
           }
         }
       },
-      "Swashbuckle.AspNetCore.SwaggerGen/7.3.1": {
+      "Swashbuckle.AspNetCore.SwaggerGen/8.0.0": {
         "dependencies": {
-          "Swashbuckle.AspNetCore.Swagger": "7.3.1"
+          "Swashbuckle.AspNetCore.Swagger": "8.0.0"
         },
         "runtime": {
           "lib/net8.0/Swashbuckle.AspNetCore.SwaggerGen.dll": {
-            "assemblyVersion": "7.3.1.0",
-            "fileVersion": "7.3.1.1111"
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.0.1197"
           }
         }
       },
-      "Swashbuckle.AspNetCore.SwaggerUI/7.3.1": {
+      "Swashbuckle.AspNetCore.SwaggerUI/8.0.0": {
         "runtime": {
           "lib/net8.0/Swashbuckle.AspNetCore.SwaggerUI.dll": {
-            "assemblyVersion": "7.3.1.0",
-            "fileVersion": "7.3.1.1111"
+            "assemblyVersion": "8.0.0.0",
+            "fileVersion": "8.0.0.1197"
           }
         }
       },
@@ -725,13 +725,13 @@
       "System.Threading.Channels/8.0.0": {},
       "G4.Services.Domain.V4/1.0.0": {
         "dependencies": {
-          "G4.Api": "2025.3.11.34",
-          "G4.Plugins": "2025.3.7.34",
-          "G4.Plugins.Common": "2025.3.11.106",
-          "G4.Plugins.Ui": "2025.3.11.106",
+          "G4.Api": "2025.3.29.35",
+          "G4.Plugins": "2025.3.28.36",
+          "G4.Plugins.Common": "2025.3.28.107",
+          "G4.Plugins.Ui": "2025.3.28.107",
           "G4.Settings": "1.0.0",
           "Microsoft.AspNetCore.SignalR.Client": "8.0.10",
-          "Swashbuckle.AspNetCore.Annotations": "7.3.1"
+          "Swashbuckle.AspNetCore.Annotations": "8.0.0"
         },
         "runtime": {
           "G4.Services.Domain.V4.dll": {
@@ -744,7 +744,7 @@
         "dependencies": {
           "G4.Services.Domain.V4": "1.0.0",
           "Microsoft.VisualStudio.Azure.Containers.Tools.Targets": "1.21.2",
-          "Swashbuckle.AspNetCore": "7.3.1"
+          "Swashbuckle.AspNetCore": "8.0.0"
         },
         "runtime": {
           "G4.Services.Hub.Api.V4.dll": {
@@ -755,7 +755,7 @@
       },
       "G4.Settings/1.0.0": {
         "dependencies": {
-          "G4.Converters": "2025.3.7.34",
+          "G4.Converters": "2025.3.28.36",
           "LiteDB": "5.0.17",
           "Microsoft.Extensions.Configuration": "8.0.0",
           "Microsoft.Extensions.Configuration.Abstractions": "8.0.0",
@@ -804,75 +804,75 @@
       "path": "g4.abstraction.webdriver/2025.3.7.16",
       "hashPath": "g4.abstraction.webdriver.2025.3.7.16.nupkg.sha512"
     },
-    "G4.Api/2025.3.11.34": {
+    "G4.Api/2025.3.29.35": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-uJQzXOCIHaHf0WCrCfjzCfwjmBaHRNfDMz3eHBCsv+LToI68o9hnWXUqdmvIhWRKBot00Hg97daFCzqsqJc82A==",
-      "path": "g4.api/2025.3.11.34",
-      "hashPath": "g4.api.2025.3.11.34.nupkg.sha512"
+      "sha512": "sha512-J2kxqn8hvEh96z0j1FjCj9Msu0H4VCDT/ceiOBDDWPrpDYJBbhDTTGNEOlsDAOUl1E7YLIPlZsOd4EIbfF8VuQ==",
+      "path": "g4.api/2025.3.29.35",
+      "hashPath": "g4.api.2025.3.29.35.nupkg.sha512"
     },
-    "G4.Attributes/2025.3.7.34": {
+    "G4.Attributes/2025.3.28.36": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-A8CmezH+/aVWbxMVBI6G4PSq2Ndblcn9IhNgxSFSx373UQ8sFmC/kSVVk2C3yCTb2Fua2eLSwFmvEn2io+5C7A==",
-      "path": "g4.attributes/2025.3.7.34",
-      "hashPath": "g4.attributes.2025.3.7.34.nupkg.sha512"
+      "sha512": "sha512-pTeBmpNNh2JU5pHfXS8Se3iRsjiYucULwfbDaaOTIuTzEgWT+S0SdSWReQm7YG8ZMrafXqgnUisE0xgOpFRCEA==",
+      "path": "g4.attributes/2025.3.28.36",
+      "hashPath": "g4.attributes.2025.3.28.36.nupkg.sha512"
     },
-    "G4.Cache/2025.3.7.34": {
+    "G4.Cache/2025.3.28.36": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-lThoPYcv8TN/jPToZ11g3qPdFP3KVoppofZENtrMSiOr9WHNDj1qp2nV1KSQSjkTnPxp1w7iBF5XBccGRGu/fw==",
-      "path": "g4.cache/2025.3.7.34",
-      "hashPath": "g4.cache.2025.3.7.34.nupkg.sha512"
+      "sha512": "sha512-rweMhxSAiqfUARyIKakYLiTomz/YigTBwLouwE+Bo7QQXtf1vNoZMyPvkxA62gwQFO4xbnLPP6HWVMQLF+kzDg==",
+      "path": "g4.cache/2025.3.28.36",
+      "hashPath": "g4.cache.2025.3.28.36.nupkg.sha512"
     },
-    "G4.Converters/2025.3.7.34": {
+    "G4.Converters/2025.3.28.36": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-2kM/knAgtuB++nSA9aiue2N0GLX1UPKSqZ4dxAI3R4EUMMpYDh2GNC8JsvmPsXW9gk6GFuXy+KJRRZsIREyyfA==",
-      "path": "g4.converters/2025.3.7.34",
-      "hashPath": "g4.converters.2025.3.7.34.nupkg.sha512"
+      "sha512": "sha512-Itf/YzUQSzcR/9xIfTcPufkTV3N1KI9QbYjCRPPg6NiRIH6WbwzBXs19039Mfgu44t39uswvUz+l4XJSevn0Mg==",
+      "path": "g4.converters/2025.3.28.36",
+      "hashPath": "g4.converters.2025.3.28.36.nupkg.sha512"
     },
-    "G4.Exceptions/2025.3.7.34": {
+    "G4.Exceptions/2025.3.28.36": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-Lf8avQyND20c7K+/GzGJTP75Kg5ziF5pYBgcofBYG8lVmd1iydWL/+HecXGE7U0uWuy346kFNgsBRpk3cQU9Bg==",
-      "path": "g4.exceptions/2025.3.7.34",
-      "hashPath": "g4.exceptions.2025.3.7.34.nupkg.sha512"
+      "sha512": "sha512-PRHBsvsC5D0IbwQL/b6tVn8c6cD15abGIsDtSmDljFRms3zEpfGqXYHrib+FVbxhVXMWoXPbEMUbV5hhUGRsMQ==",
+      "path": "g4.exceptions/2025.3.28.36",
+      "hashPath": "g4.exceptions.2025.3.28.36.nupkg.sha512"
     },
-    "G4.Extensions/2025.3.7.34": {
+    "G4.Extensions/2025.3.28.36": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-yG5Tv+BGBo1w8/JgBdjKFCtJN3Y4p6Md60SJfANZP4HbaHjYDRivDpQfDlSZJXCLBQgD6dp4gKm399mxafIxcA==",
-      "path": "g4.extensions/2025.3.7.34",
-      "hashPath": "g4.extensions.2025.3.7.34.nupkg.sha512"
+      "sha512": "sha512-nYXGFGAfWQaOfSXOShid/FLFDdpBhSUuDSpn51PG7hWWH9P5tb/pQ5RfXorkdcjZqIn7ib5D0KO7dL2DiiMHlg==",
+      "path": "g4.extensions/2025.3.28.36",
+      "hashPath": "g4.extensions.2025.3.28.36.nupkg.sha512"
     },
-    "G4.Models/2025.3.7.34": {
+    "G4.Models/2025.3.28.36": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-ADwuG0ejxNOpbdCzSxF5TcA15jjMI/QN8Lzm0jjJ8i9YqmI2PEp2VuCxJ+//h0T9b1c6sPWt7dpOCQechnXHWw==",
-      "path": "g4.models/2025.3.7.34",
-      "hashPath": "g4.models.2025.3.7.34.nupkg.sha512"
+      "sha512": "sha512-bHusSnZoqqp11cMubXilwhpYc+65Q/YTJYzU+w/Wb6FEE2CcVN573BQHHvgk/yVtnT8G2wBelB0XOGrL5DaGiQ==",
+      "path": "g4.models/2025.3.28.36",
+      "hashPath": "g4.models.2025.3.28.36.nupkg.sha512"
     },
-    "G4.Plugins/2025.3.7.34": {
+    "G4.Plugins/2025.3.28.36": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-2JFz4U58hUL/xvBAFfIaorQx7W8hIqiF1iUVwJqJThjESD7w1u4TqFdSKfg9gdPO+i3JfpftoHjqpk3SZEGCMw==",
-      "path": "g4.plugins/2025.3.7.34",
-      "hashPath": "g4.plugins.2025.3.7.34.nupkg.sha512"
+      "sha512": "sha512-wr9gmho6g3/wjnUkf8lf4+cQiQsheKJkX8h1P7qe+6zpCHIJR6yzdt7Dzx0Dm6NVHsMRcCV5XE4RVASpiRoChQ==",
+      "path": "g4.plugins/2025.3.28.36",
+      "hashPath": "g4.plugins.2025.3.28.36.nupkg.sha512"
     },
-    "G4.Plugins.Common/2025.3.11.106": {
+    "G4.Plugins.Common/2025.3.28.107": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-uZdJd8/1ct0iGOM2H1Gk5Yuyagd+4DxnuPYrneLSNC88ztabrU+7fkKnmijWRDPQL4SU9WeIR3XvKJCO81JQUw==",
-      "path": "g4.plugins.common/2025.3.11.106",
-      "hashPath": "g4.plugins.common.2025.3.11.106.nupkg.sha512"
+      "sha512": "sha512-EIdW4YxOK5kFvnVRyaHS5QT/oNO1igLywHQHKR4tRIHgRudSjoRId4RZSum3VxBi4suIdMeAOVjUI53yVB5tYQ==",
+      "path": "g4.plugins.common/2025.3.28.107",
+      "hashPath": "g4.plugins.common.2025.3.28.107.nupkg.sha512"
     },
-    "G4.Plugins.Ui/2025.3.11.106": {
+    "G4.Plugins.Ui/2025.3.28.107": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-rc+5kFgb6U7rH8kdLhpp6BeOzSoMi2t5HWmf04UVgVuq/X4S10gVS/4YaJOHvyjh0QQEazSoDp/Gk5J2BgSsog==",
-      "path": "g4.plugins.ui/2025.3.11.106",
-      "hashPath": "g4.plugins.ui.2025.3.11.106.nupkg.sha512"
+      "sha512": "sha512-XfnIzqrfXuSNCjdrwpNVDpm7Q7YOV1/+MMW9nRIxj9ojC+0HgX7DBCHuu5weMDobHGRUaJWa8ax8Jr3S/n5UXQ==",
+      "path": "g4.plugins.ui/2025.3.28.107",
+      "hashPath": "g4.plugins.ui.2025.3.28.107.nupkg.sha512"
     },
     "G4.WebDriver/2025.3.7.10": {
       "type": "package",
@@ -1175,12 +1175,12 @@
       "path": "microsoft.extensions.primitives/8.0.0",
       "hashPath": "microsoft.extensions.primitives.8.0.0.nupkg.sha512"
     },
-    "Microsoft.OpenApi/1.6.22": {
+    "Microsoft.OpenApi/1.6.23": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-aBvunmrdu/x+4CaA/UP1Jx4xWGwk4kymhoIRnn2Vp+zi5/KOPQJ9EkSXHRUr01WcGKtYl3Au7XfkPJbU1G2sjQ==",
-      "path": "microsoft.openapi/1.6.22",
-      "hashPath": "microsoft.openapi.1.6.22.nupkg.sha512"
+      "sha512": "sha512-tZ1I0KXnn98CWuV8cpI247A17jaY+ILS9vvF7yhI0uPPEqF4P1d7BWL5Uwtel10w9NucllHB3nTkfYTAcHAh8g==",
+      "path": "microsoft.openapi/1.6.23",
+      "hashPath": "microsoft.openapi.1.6.23.nupkg.sha512"
     },
     "Microsoft.VisualStudio.Azure.Containers.Tools.Targets/1.21.2": {
       "type": "package",
@@ -1196,40 +1196,40 @@
       "path": "newtonsoft.json/13.0.3",
       "hashPath": "newtonsoft.json.13.0.3.nupkg.sha512"
     },
-    "Swashbuckle.AspNetCore/7.3.1": {
+    "Swashbuckle.AspNetCore/8.0.0": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-6u8w+UXp/sF89xQjfydWw6znQrUpbpFOmEIs8ODE+S0bV+mCQ9dNP4mk+HRsGHylpDaP5KSYSCEfFSgluLXHsA==",
-      "path": "swashbuckle.aspnetcore/7.3.1",
-      "hashPath": "swashbuckle.aspnetcore.7.3.1.nupkg.sha512"
+      "sha512": "sha512-K9FzGTxmwfD+7sVf/FTq/TZFHBTXcROgdcg7gLFwKwgvXwaqTtjGVdam27j0kYfgZZyWlOKr+abmtyd2nAd5eA==",
+      "path": "swashbuckle.aspnetcore/8.0.0",
+      "hashPath": "swashbuckle.aspnetcore.8.0.0.nupkg.sha512"
     },
-    "Swashbuckle.AspNetCore.Annotations/7.3.1": {
+    "Swashbuckle.AspNetCore.Annotations/8.0.0": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-DuH1WoZDFGhD0p9b9ru1kNlC/BBCQyArKUzDQJMt3bPfia/27Yi69IYYC3+QydZwm2qSXcaUy9Z5CFvXb/X9Tg==",
-      "path": "swashbuckle.aspnetcore.annotations/7.3.1",
-      "hashPath": "swashbuckle.aspnetcore.annotations.7.3.1.nupkg.sha512"
+      "sha512": "sha512-hQVL993wTHpeYQbWoMAU7K6Fn8ewtQ9BpEfyJL0TR2Ra1oealHle9424PSETdUPKEL+wbuyN4z9uxYLBRouVpQ==",
+      "path": "swashbuckle.aspnetcore.annotations/8.0.0",
+      "hashPath": "swashbuckle.aspnetcore.annotations.8.0.0.nupkg.sha512"
     },
-    "Swashbuckle.AspNetCore.Swagger/7.3.1": {
+    "Swashbuckle.AspNetCore.Swagger/8.0.0": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-jQuJ8kVbq+YE8WsJE3RwWHlF1kasp0QkA9Gl6NeNLICrhcgN8IQIthMufYW6t/4hpcN5cBIdES5jCEV81WjHbA==",
-      "path": "swashbuckle.aspnetcore.swagger/7.3.1",
-      "hashPath": "swashbuckle.aspnetcore.swagger.7.3.1.nupkg.sha512"
+      "sha512": "sha512-+8Y4pVTWbnzotIk6d6rcwsHGpCchPDqqrvYkyGlI3go+pFaKM+4eX30iCyI0hvr0RMtObJCFhK6aDtlQFbEF1g==",
+      "path": "swashbuckle.aspnetcore.swagger/8.0.0",
+      "hashPath": "swashbuckle.aspnetcore.swagger.8.0.0.nupkg.sha512"
     },
-    "Swashbuckle.AspNetCore.SwaggerGen/7.3.1": {
+    "Swashbuckle.AspNetCore.SwaggerGen/8.0.0": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-xs7Pznb3SSjZy7HpThE0ILqECfQFsGDHOrRoIYD/j67ktdRR1juDG4AMyidXXCOipgzHanZoF+nFrc+Nmjqjyw==",
-      "path": "swashbuckle.aspnetcore.swaggergen/7.3.1",
-      "hashPath": "swashbuckle.aspnetcore.swaggergen.7.3.1.nupkg.sha512"
+      "sha512": "sha512-skCeIQ93yMcUm1PQby5qitFM6KLIlLMj4/i8JHy86x2OFzxTNaaas2kUg6rNV3JvucFvYCNyImg7NMtZHErSzQ==",
+      "path": "swashbuckle.aspnetcore.swaggergen/8.0.0",
+      "hashPath": "swashbuckle.aspnetcore.swaggergen.8.0.0.nupkg.sha512"
     },
-    "Swashbuckle.AspNetCore.SwaggerUI/7.3.1": {
+    "Swashbuckle.AspNetCore.SwaggerUI/8.0.0": {
       "type": "package",
       "serviceable": true,
-      "sha512": "sha512-hs6C+lmNEzipOA1WPQpIaGvvoXjUbnoevbv6l7o9ZQE8SNF8ggjOmK6NB6cYdMcEvk0uBeKl4Qq/BnRt5MFVqg==",
-      "path": "swashbuckle.aspnetcore.swaggerui/7.3.1",
-      "hashPath": "swashbuckle.aspnetcore.swaggerui.7.3.1.nupkg.sha512"
+      "sha512": "sha512-IMqmgclFiZL2QIfopOmWYofZzckrl+SdMt1h4mKC0jc94F+uzt3IHA3YFC0CGlwBqTTSnxHqNUKomNTeAhZbYA==",
+      "path": "swashbuckle.aspnetcore.swaggerui/8.0.0",
+      "hashPath": "swashbuckle.aspnetcore.swaggerui.8.0.0.nupkg.sha512"
     },
     "System.IO.Pipelines/8.0.0": {
       "type": "package",

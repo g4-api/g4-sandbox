@@ -19,20 +19,14 @@ RUN apt-get update && \
     apt-get install -y powershell && \
     rm -rf /var/lib/apt/lists/*
 
-# Optional default values for the ENV variables (remove quotes so values are literal)
-ENV BOT_NAME=
-ENV CRON_SCHEDULES=
-ENV DRIVER_BINARIES=
-ENV HUB_URI=
-ENV TOKEN=
-
 # Create the /bots directory and ensure it has read/write permissions
 RUN mkdir -p /bots && chmod 777 /bots
 
 # Create a directory for your script
 WORKDIR /app
 
-# Copy the PowerShell script into the container
+# Copy the PowerShell script and .env file into the container
+COPY .env /app/.env
 COPY Start-CronBot.ps1 /app/Start-CronBot.ps1
 
 # Make the PowerShell script executable (optional good practice)
@@ -57,7 +51,7 @@ CRON_FILE="/etc/cron.d/${BOT_NAME}-cron"\n\
 # Create cron job file dynamically from the CRON_SCHEDULES environment variable\n\
 IFS="," read -ra SCHEDULES <<< "$CRON_SCHEDULES"\n\
 for schedule in "${SCHEDULES[@]}"; do\n\
-  echo "$schedule pwsh /app/Start-CronBot.ps1 -BotVolume '/bots' -BotName '\$BOT_NAME' -CronSchedules '\$CRON_SCHEDULES' -DriverBinaries '\$DRIVER_BINARIES' -HubUri '\$HUB_URI' -Token '\$TOKEN' >> /var/log/cron.log 2>&1" >> $CRON_FILE\n\
+  echo "$schedule pwsh /app/Start-CronBot.ps1 -BotVolume '/bots' -BotName '\$BOT_NAME' -DriverBinaries '\$DRIVER_BINARIES' -HubUri '\$HUB_URI' -Token '\$TOKEN' >> /var/log/cron.log 2>&1" >> $CRON_FILE\n\
 done\n\
 \n\
 # Set proper permissions for the cron job file\n\

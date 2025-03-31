@@ -1,3 +1,8 @@
+param (
+    [CmdletBinding()]
+    [int]$SessionRequestTimeout = 42300
+)
+
 function Join-Paths {
     <#
     .SYNOPSIS
@@ -37,7 +42,10 @@ function Join-Paths {
 }
 
 # Determine if the OS platform is Linux
-$isLinuxOs = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux)
+$isLinuxOs = $false
+if ([Environment]::OSVersion.Platform -eq [System.PlatformID]::Unix) {
+    $isLinuxOs = $true
+}
 
 # Define base directory (the directory containing the script)
 $baseFolder = $PSScriptRoot
@@ -59,5 +67,5 @@ $seleniumExecutable     = Join-Paths @($binariesFolder, "selenium-server.jar")
 Write-Host "Starting Selenium Hub (session timeout ~42300 seconds)..."
 Start-Process `
     -FilePath $javaExecutable `
-    -ArgumentList "-jar $($seleniumExecutable) hub --session-request-timeout 42300" `
+    -ArgumentList "-jar $($seleniumExecutable) hub --session-request-timeout $($SessionRequestTimeout)" `
     -WorkingDirectory $binariesFolder

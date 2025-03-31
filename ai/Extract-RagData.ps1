@@ -285,7 +285,6 @@ $response = Invoke-RestMethod `
     -Body        $body `
     -ContentType "application/json; charset=utf-8"
    
-
 Write-Verbose "Filtering response for included plugin types..."
 $plugins = @()
 
@@ -393,3 +392,6 @@ foreach ($plugin in $plugins) {
         Set-Content -Path $errorFilePath -Value $body -Force
     }
 }
+
+# Clear the progress bar when done
+Write-Progress -Activity "Processing Plugins" -Completed

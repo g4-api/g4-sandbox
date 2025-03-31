@@ -19,13 +19,6 @@ RUN apt-get update && \
     apt-get install -y powershell && \
     rm -rf /var/lib/apt/lists/*
 
-# Optional default values for the ENV variables
-ENV BOT_NAME=
-ENV DRIVER_BINARIES=
-ENV HUB_URI=
-ENV INTERVAL_TIME=
-ENV TOKEN=
-
 # Echo the variables in the desired format during build
 RUN echo "BOT_NAME: ${BOT_NAME}" && \
     echo "DRIVER_BINARIES: ${DRIVER_BINARIES}" && \
@@ -39,7 +32,8 @@ RUN mkdir -p /bots && chmod 777 /bots
 # Create a directory for your script
 WORKDIR /app
 
-# Copy the PowerShell script into the container
+# Copy the PowerShell script and .env file into the container
+COPY .env /app/.env
 COPY Start-StaticBot.ps1 /app/Start-StaticBot.ps1
 
 # Make script executable (optional good practice)

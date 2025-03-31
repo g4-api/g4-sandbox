@@ -1,4 +1,50 @@
-﻿param(
+﻿<# 
+.SYNOPSIS
+    Processes plugin manifests by generating question-answer pairs and embeddings using OpenAI APIs.
+
+.DESCRIPTION
+    This script loads RAG (Retrieval-Augmented Generation) entry files from a specified input directory. For each entry, it generates a series of QnA pairs by sending a plugin manifest to the OpenAI Chat API and then generates an embedding by calling the OpenAI Embedding API. 
+    The resulting QnA pairs and embedding are appended to the original JSON object, which is then saved to an output directory. If errors occur, the script writes the request body details to an errors directory.
+
+.PARAMETERS
+    -EmbeddingApiUri [string] (Optional)
+        The URI endpoint for the embedding API. Defaults to "https://api.openai.com/v1/embeddings".
+
+    -EmbeddingModel [string] (Optional)
+        The model identifier for the embedding API. Defaults to "text-embedding-ada-002".
+
+    -ErrorsDirectory [string] (Optional)
+        The directory where errors will be logged. Defaults to a folder "rag-entries-qna-errors" located relative to the script.
+
+    -IncludePlugins [string[]] (Optional)
+        An array of plugin ids to include. If specified, only these plugins will be processed.
+
+    -InputDirectory [string] (Optional)
+        The directory from which the RAG entry files are loaded. Defaults to a folder "rag-entries" relative to the script.
+
+    -MaxTokens [int] (Optional)
+        Maximum number of tokens to use in API requests. Defaults to 6000.
+
+    -OpenAiApiKey [string] (Required)
+        A valid OpenAI API key for authentication.
+
+    -OpenAiApiUri [string] (Optional)
+        The URI endpoint for the OpenAI Chat API. Defaults to "https://api.openai.com/v1/chat/completions".
+
+    -OpenAiModel [string] (Optional)
+        The model identifier for the OpenAI Chat API. Defaults to "gpt-4o-mini".
+
+    -OutputDirectory [string] (Optional)
+        The directory where the processed RAG entries are saved. Defaults to a folder "rag-entries-qna" relative to the script.
+
+    -Repositories [PSCustomObject[]] (Optional)
+        An array of repository objects (if applicable). Defaults to an empty array.
+
+.NOTES
+    Ensure that the variables $embeddingSystemPrompt and $embeddingPrompt are defined in the script.
+    The script creates output and error directories if they do not exist.
+#>
+param(
     [CmdletBinding()]
     [Parameter(Mandatory = $false)]
     [string]$EmbeddingApiUri = "https://api.openai.com/v1/embeddings",
@@ -54,6 +100,7 @@ Example format:
 **Answer:** You can use the following rule to perform this assertion:
 ```json
 {
+  "$$type": "Action",
   "argument": "{{$ --Condition:ElementText --Operator:Match --Expected:^Hello.*}}",
   "locator": "CssSelector",
   "onElement": "#greeting",
@@ -280,7 +327,12 @@ function Set-Embedding {
     } | ConvertTo-Json -Depth 50 -Compress
 
     Write-Verbose "Calling Embedding API for plugin: $($jsonContent.id)..."
-    $response = Invoke-RestMethod -Method Post -Uri $EmbeddingApiUri -Headers $Headers -Body $body -ContentType $ContentType
+    $response = Invoke-RestMethod `
+        -Method      Post `
+        -Uri         $EmbeddingApiUri `
+        -Headers     $Headers `
+        -Body        $body `
+        -ContentType $ContentType
 
     Write-Verbose "Appending the document text and generated embedding to the original JSON object"
     Add-Member -InputObject $jsonContent -MemberType NoteProperty -Name "text"      -Value $documentText
@@ -397,3 +449,6 @@ foreach ($ragEntry in $ragEntries) {
         Set-Content -Path $errorFilePath -Value $body -Force
     }
 }
+
+# Clear the progress bar when done
+Write-Progress -Activity "Processing Plugins" -Completed
