@@ -47,14 +47,14 @@ a Docker container with the provided parameters and exits.
 .EXAMPLE
 Start-HttpQsListenerBot.ps1 -BotVolume "C:\Bots" -BotName "MyBot" -HostPort 8080 `
     -ContentType "application/json" -DriverBinaries "http://host.docker.internal:4444/wd/hub" `
-    -HubUri "http://host.docker.internal:9944" -ResponseContent "{}" -Token "my-token"
+    -HubUri "http://host.docker.internal:9944" -Base64ResponseContent "{}" -Token "my-token"
 
 Starts the bot listener on port 8080 with the specified parameters.
 
 .EXAMPLE
 Start-HttpQsListenerBot.ps1 -BotVolume "C:\Bots" -BotName "MyBot" -HostPort 8080 `
     -ContentType "application/json" -DriverBinaries "http://host.docker.internal:4444/wd/hub" `
-    -HubUri "http://host.docker.internal:9944" -ResponseContent "{}" -Token "my-token" -Docker
+    -HubUri "http://host.docker.internal:9944" -Base64ResponseContent "{}" -Token "my-token" -Docker
 
 Runs the bot inside a Docker container using the specified parameters.
 #>
@@ -62,11 +62,11 @@ param (
     [CmdletBinding()]
     [Parameter(Mandatory = $true)] [string]$BotVolume,
     [Parameter(Mandatory = $true)] [string]$BotName,
-    [Parameter(Mandatory = $false)][int]   $HostPort = 8080,
-    [Parameter(Mandatory = $false)][string]$ContentType = "application/json; charset=utf-8",
+    [Parameter(Mandatory = $false)][int]   $HostPort              = 8080,
+    [Parameter(Mandatory = $false)][string]$ContentType           = "application/json; charset=utf-8",
     [Parameter(Mandatory = $true)] [string]$DriverBinaries,
     [Parameter(Mandatory = $true)] [string]$HubUri,
-    [Parameter(Mandatory = $false)][string]$ResponseContent = '{\"message\": \"success\"}',
+    [Parameter(Mandatory = $false)][string]$Base64ResponseContent = "eyJtZXNzYWdlIjoic3VjY2VzcyJ9",
     [Parameter(Mandatory = $true)] [string]$Token,
     [Parameter(Mandatory = $false)][switch]$Docker
 )
@@ -112,176 +112,196 @@ function Invoke-G4Bot {
         $Token
     )
 
-    Write-Verbose "Generating a unique session identifier using the current date and time."
+    Write-Verbose "Generating a unique session identifier using the current date and time"
     $session = (Get-Date).ToString("yyyyMMddHHmmssfff")
 
-    Write-Verbose "Constructing file paths for, input, output, and bot directories."
+    Write-Verbose "Constructing file paths for, input, output, and bot directories"
     $outputDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
     $botDirectory           = Join-Path $BotVolume $BotName
     $botAutomationDirectory = Join-Path $botDirectory "bot"
     $botFilePath            = Join-Path $botAutomationDirectory "automation.json"
     
-    Write-Verbose "Constructing output and error log file paths."
+    Write-Verbose "Constructing output and error log file paths"
     $outputFilePath = [System.IO.Path]::Combine($outputDirectory, "$($BotName)-$($session).json")
     $errorsPath     = [System.IO.Path]::Combine($BotVolume, $BotName, "errors", "$($BotName)-$($session).json")
     
-    Write-Verbose "Reading and parsing the 'automation.json' configuration file."
+    Write-Verbose "Reading and parsing the 'automation.json' configuration file"
     $botFileContent = [System.IO.File]::ReadAllText($botFilePath, [System.Text.Encoding]::UTF8)
     $botFileJson    = ConvertFrom-Json $botFileContent
     
-    Write-Verbose "Updating driver binaries and authentication token in the configuration."
+    Write-Verbose "Updating driver binaries and authentication token in the configuration"
     $botFileJson.driverParameters.driverBinaries = $DriverBinaries
     $botFileJson.authentication.token            = $Token
     
-    Write-Verbose "Serializing the updated configuration to JSON and encoding it in Base64."
+    Write-Verbose "Serializing the updated configuration to JSON and encoding it in Base64"
     $botFileContent = ConvertTo-Json $botFileJson -Depth 50 -Compress
     $botBytes       = [System.Text.Encoding]::UTF8.GetBytes($botFileContent)
     $botContent     = [System.Convert]::ToBase64String($botBytes)
 
-    Write-Verbose "Constructing the request URI by appending the API endpoint to the Hub URI."
+    Write-Verbose "Constructing the request URI by appending the API endpoint to the Hub URI"
     $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
     
     try {
-        Write-Verbose "Sending the Base64-encoded configuration to the remote endpoint at: $requestUri"
-        $response = Invoke-RestMethod -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
+        Write-Host "Sending the Base64-encoded configuration to the remote endpoint at: $($requestUri)"
+        $response = Invoke-WebRequest -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
     }
     catch {
-        Write-Verbose "An error occurred while sending the request. Logging error to: $errorsPath. Details: $_"
-        "Error: $_" | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
+        $baseException = $_.Exception.GetBaseException()
+        $errorResponse = @{
+            error      = "Internal Server Error"
+            message    = $baseException.Message
+            stackTrace = $baseException.StackTrace
+        }
+        $errorResponseJson = ($errorResponse | ConvertTo-Json -Depth 30 -Compress)
+        $response = @{
+            Content       = $errorResponseJson
+            Base64Content = ([System.Convert]::ToBase64String(([System.Text.Encoding]::UTF8.GetBytes($errorResponseJson))))
+            ContentType   = "application/json; charset=utf-8"
+            StatusCode    = 500
+        }
+
+        $response.Content | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
+        Write-Error "An error occurred '$($baseException.Message)'.$([System.Environment]::NewLine)Check $($errorsPath) for details"
     }
-    finally {      
-        try {
-            Write-Verbose "Saving the response from the remote endpoint to the output file: $outputFilePath"
-            $response | ConvertTo-Json -Depth 50 -Compress | Out-File -FilePath $outputFilePath -Force
-            Write-Verbose "Response saved successfully."
+    try {
+        Write-Verbose "Saving the response from the remote endpoint to the output file: $($outputFilePath)"
+        if ($null -ne $outputFilePath -and $response.StatusCode -lt 204) {
+            $response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
         }
-        catch {
-            Write-Warning "Failed to save the response to: $outputFilePath. Details: $_"
-        }
+    }
+    catch {
+        Write-Error "Failed to save response to: $outputFilePath. Error details: $($_.Exception.GetBaseException().Message)"
     }
 
-    Write-Verbose "Invoke-G4Bot execution completed."
+    Write-Verbose "Invoke-G4Bot execution completed"
     return $response
 }
 
 function Import-EnvironmentVariablesFile {
     <#
     .SYNOPSIS
-        Imports environment variables from an environment file into the current session.
+        Imports environment variables from an environment file and additional parameters into the current session.
 
     .DESCRIPTION
-        This function reads an environment file (with each line in the format KEY=value),
-        splits each line on the first "=" occurrence (allowing values to contain additional "=" characters),
-        and assigns the variables to the current session's environment.
-        A list of environment variable names to skip can be provided, and those keys will not be imported.
+        This function reads an environment file (each line formatted as KEY=value) and splits each line on the first "=".
+        In addition, it accepts an array of additional environment variable strings (AdditionalEnvironmentVariables) in key=value format.
+        Both sets of key-value pairs are imported into the current session's environment.
+        Any keys specified in SkipNames are skipped.
 
     .PARAMETER EnvironmentFilePath
-        The full path to the environment file. Defaults to ".env" if not specified.
+        The full path to the environment file. Defaults to ".env" in the script's directory.
 
     .PARAMETER SkipNames
-        An array of environment variable names that should not be imported from the file.
+        An array of environment variable names that should not be imported from the file or the additional parameters.
 
+    .PARAMETER AdditionalEnvironmentVariables
+        An array of additional environment variable strings in key=value format.
+        
     .EXAMPLE
-        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME"
-        Imports environment variables from the specified file, skipping the variables named PATH and JAVA_HOME.
-
-    .EXAMPLE
-        Import-EnvironmentVariablesFile
-        Imports environment variables from a file named .env in the current directory.
+        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME" `
+            -AdditionalEnvironmentVariables @("MY_VAR=Value1", "OTHER_VAR=Value2")
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $false)]
-        [string]$EnvironmentFilePath = (Join-Path $PSScriptRoot ".env"),
-        
-        [Parameter(Mandatory = $false)]
-        [string[]]$SkipNames = @()
+        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
+        [string[]]$SkipNames                      = @(),
+        [string[]]$AdditionalEnvironmentVariables = @()
     )
 
-    # Check if the environment file exists; if not, display a message and exit.
+    Write-Verbose "Check if the environment file exists; if not, display a message and exit"
     if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
+        Write-Warning "The environment file was not found at path: $($EnvironmentFilePath)"
         return
     }
 
-    # Read the environment file line by line.
-    Get-Content $EnvironmentFilePath -Force -Encoding UTF8 | ForEach-Object {
-        # Skip lines that are comments (starting with '#') or empty after trimming whitespace.
+    Write-Verbose "Read the environment file line by line"
+    $parametersCollection = (Get-Content $EnvironmentFilePath -Force -Encoding UTF8) + $AdditionalEnvironmentVariables
+    $parametersCollection | ForEach-Object {
+        Write-Verbose "Skip lines that are comments (starting with '#') or empty after trimming whitespace"
         if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
             return
         }
 
-        # Split the line into two parts at the first '=' occurrence.
+        Write-Verbose "Split the line into two parts at the first '=' occurrence"
         $parts = $_.Split('=', 2)
         
-        # If the line does not contain exactly two parts, skip it.
+        Write-Verbose "If the line does not contain exactly two parts, skip it"
         if ($parts.Length -ne 2) {
             return
         }
         
-        # Trim any leading or trailing whitespace from the key and value.
+        Write-Verbose "Trim any leading or trailing whitespace from the key and value"
         $key   = $parts[0].Trim()
         $value = $parts[1].Trim()
 
         # Skip this key if it is in the skip list.
         if ($SkipNames -contains $key) {
-            Write-Verbose "Skipping environment variable '$key' as it is in the skip list."
+            Write-Verbose "Skipping environment variable '$($key)' as it is in the skip list"
             return
         }
         
-        # Set the environment variable for the current process using Set-Item.
-        Set-Item -Path "Env:$key" -Value $value
-
-        # Write a verbose message showing the key-value pair that was set.
-        Write-Verbose "Set environment variable '$key' with value '$value'"
+        Write-Verbose "Set the environment variable for the current process using Set-Item"
+        Set-Item -Path "Env:$($key)" -Value $value
+        Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
     }
 }
 
 function Write-Response {
     <#
     .SYNOPSIS
-    Writes an HTTP response to the output stream.
+        Writes an HTTP response to the output stream.
 
     .DESCRIPTION
-    This function encodes a given response string into a UTF-8 byte array, sets the HTTP response's
-    content type, length, and status code, writes the encoded content to the response's output stream,
-    and then closes the stream.
+        This function encodes a given response string into a UTF-8 byte array, sets the HTTP response's
+        content type, length, and status code, writes the encoded content to the response's output stream,
+        and then closes the stream.
 
     .PARAMETER ContentType
-    Specifies the MIME type for the response (e.g., "text/html").
+        Specifies the MIME type for the response (e.g., "text/html").
 
     .PARAMETER Response
-    An HttpListenerResponse object to which the response will be written.
+        An HttpListenerResponse object to which the response will be written.
 
     .PARAMETER ResponseContent
-    The text content that will be sent as the HTTP response body.
+        The text content that will be sent as the HTTP response body.
 
     .PARAMETER StatusCode
-    (Optional) The HTTP status code to be set on the response. Defaults to 200.
+        (Optional) The HTTP status code to be set on the response. Defaults to 200.
 
     .OUTPUTS
-    None. The function writes directly to the provided HTTP response output stream.
+        None. The function writes directly to the provided HTTP response output stream.
     #>
     param(
         $ContentType,
         $Response,
-        $ResponseContent,
+        $Base64ResponseContent,
         $StatusCode = 200
     )
 
-    Write-Verbose "Encoding the response string to a UTF8 byte array."
-    $buffer                   = [System.Text.Encoding]::UTF8.GetBytes($ResponseContent)
-    $Response.ContentLength64 = $buffer.Length
-    $Response.ContentType     = $ContentType
-    $Response.StatusCode      = $StatusCode
+    try {
+        Write-Verbose "Encoding the response string to a UTF8 byte array"
+        $decodedContent           = ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Base64ResponseContent)))
+        $buffer                   = [System.Text.Encoding]::UTF8.GetBytes($decodedContent)
+        $Response.ContentLength64 = $buffer.Length
+        $Response.ContentType     = $ContentType
+        $Response.StatusCode      = $StatusCode
 
-    Write-Verbose "Writing the encoded response to the output stream and closing it."
-    $output = $Response.OutputStream
-    $output.Write($buffer, 0, $buffer.Length)
-    $output.Close()
+        Write-Verbose "Writing the encoded response to the output stream and closing it"
+        $output = $Response.OutputStream
+        $output.Write($buffer, 0, $buffer.Length)
+    }
+    catch {
+        Write-Error "An error occurred while writing the response: $($_.Exception.GetBaseException().Message)"
+    }
+    finally {
+        Write-Verbose "Ensure that the output stream is closed regardless of any error"
+        if ($Response -and $Response.OutputStream) {
+            $Response.OutputStream.Close()
+        }
+    }
 }
 
-Write-Verbose "Construct the base endpoint for the bot."
+Write-Verbose "Construct the base endpoint for the bot"
 $botRoute    = "/bot/v1"
 $botEndpoint = "http://+:$($HostPort)$($botRoute)/$BotName"
 
@@ -289,122 +309,156 @@ $botEndpoint = "http://+:$($HostPort)$($botRoute)/$BotName"
 if ($Docker) {
     try {
         Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$BotName'."
-        Write-Verbose "Launching Docker container with: Port mapping '$($HostPort):8080', Volume mapping '$($BotVolume):/bots', and environment variables for BOT_NAME, BOT_URI, CONTENT_TYPE, DRIVER_BINARIES, HUB_URI, RESPONSE_CONTENT, and TOKEN."
-        docker run -d -p "$($HostPort):8080" -v "$($BotVolume):/bots" `
-            -e BOT_NAME="$($BotName)" `
-            -e BOT_PORT="$($HostPort)" `
-            -e CONTENT_TYPE="$($ContentType)" `
-            -e DRIVER_BINARIES="$($DriverBinaries)" `
-            -e HUB_URI="$($HubUri)" `
-            -e RESPONSE_CONTENT="$($ResponseContent)" `
-            -e TOKEN="$($Token)" `
-            --name "$($BotName)-$([guid]::NewGuid())" g4-http-static-listener-bot:latest
+        Write-Verbose "Launching Docker container with: Port mapping '$($HostPort):8080', Volume mapping '$($BotVolume):/bots'."
+        Write-Verbose "Building the Docker command from the specified parameters."
+        $cmdLines = @(
+            "run -d -p `"$($HostPort):8080`" -v `"$($BotVolume):/bots`"",
+            " -e BOT_NAME=`"$($BotName)`"",
+            " -e BOT_PORT=`"$($HostPort)`"",
+            " -e CONTENT_TYPE=`"$($ContentType)`"",
+            " -e DRIVER_BINARIES=`"$($DriverBinaries)`"",
+            " -e HUB_URI=`"$($HubUri)`"",
+            " -e BASE64_RESPONSE_CONTENT=`"$($Base64ResponseContent)`"",
+            " -e TOKEN=`"$($Token)`"",
+            " --name `"$($BotName)-$([guid]::NewGuid())`" g4-http-static-listener-bot:latest"
+        )
 
-        Write-Host "Docker container '$($BotName)' started successfully."
+        Write-Verbose "Joining command parts into a single Docker command string."
+        $dockerCmd = $cmdLines -join [string]::Empty
+
+        Write-Host "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
+        Start-Process -FilePath "docker" -ArgumentList $dockerCmd -Wait
+        Write-Host "Docker container for bot '$($BotName)' launched successfully."
         Exit 0
     }
     catch {
-        Write-Error "Failed to start Docker container '$($BotName)': $_"
+        Write-Error "Failed to start Docker container for bot '$($BotName)': $($_.Exception.GetBaseException())"
         Exit 1
     }
 }
 
 try {
     Write-Verbose "Setting Environment Parameters"
-    Import-EnvironmentVariablesFile -Verbose
+    Import-EnvironmentVariablesFile
 }
 catch {
-    Write-Error "Failed to set environment parameters: $_"
+    Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException())"
 }
 
-Write-Verbose "Creating HttpListener object."
+Write-Verbose "Constructing the command line for Start-HttpStaticListenerBot.ps1 with the user parameters"
+$cmdLines = @(
+    ".\Start-HttpStaticListenerBot.ps1",
+    "-BotVolume `"$($BotVolume)`"",
+    "-BotName `"$($BotName)`"",
+    "-HostPort $($HostPort)",
+    "-ContentType `"$($ContentType)`"",
+    "-DriverBinaries `"$($DriverBinaries)`"",
+    "-HubUri `"$($HubUri)`"",
+    "-Base64ResponseContent `"$($Base64ResponseContent)`"",
+    "-Token `"$($Token)`""
+) -join " "
+Write-Host "Invoking Process with the following command:$([System.Environment]::NewLine)$($cmdLines)"
+
+Write-Verbose "Creating HttpListener object"
 $listener = New-Object System.Net.HttpListener
 
-Write-Verbose "Adding listening prefix '$botEndpoint/' to the HttpListener."
-$listener.Prefixes.Add("$botEndpoint/")
+Write-Verbose "Adding listening prefix '$($botEndpoint)/' to the HttpListener"
+$listener.Prefixes.Add("$($botEndpoint)/")
 
-Write-Verbose "Adding listening prefix '$botEndpoint/ping/' to the HttpListener."
-$listener.Prefixes.Add("$botEndpoint/ping/")
+Write-Verbose "Adding listening prefix '$($botEndpoint)/ping/' to the HttpListener"
+$listener.Prefixes.Add("$($botEndpoint)/ping/")
 
 try {
     $listener.Start()
-    Write-Host "Listening on $botEndpoint/"
-    Write-Host "Server is running.$([System.Environment]::NewLine)Press CTRL+C to stop the server. Note: The server will stop after receiving the next HTTP request."
+    Write-Host "Listening on $($botEndpoint)/"
+    Write-Host "Server is running.$([System.Environment]::NewLine)Press CTRL+C to stop the server.$([System.Environment]::NewLine)Note: The server will stop after receiving the next HTTP request"
 
     while ($true) {
         try {
-            Write-Verbose "Waiting for incoming HTTP request..."
+            Write-Verbose "Waiting for incoming HTTP request."
             $context  = $listener.GetContext()
             $request  = $context.Request
             $response = $context.Response
 
-            Write-Verbose "Received HTTP method '$($request.HttpMethod)'. Only GET requests are allowed."
+            Write-Verbose "Received HTTP method '$($request.HttpMethod)'. Only GET requests are allowed"
             if ($request.HttpMethod.ToUpper() -ne "GET") {
                 Write-Response `
-                    -ContentType     "application/json; charset=utf-8" `
-                    -Response        $response `
-                    -ResponseContent (@{ error = "Method Not Allowed"; message = "Only GET requests are accepted" } | ConvertTo-Json -Compress) `
-                    -StatusCode      405
+                    -ContentType           "application/json; charset=utf-8" `
+                    -Response              $response `
+                    -Base64ResponseContent "eyJlcnJvciI6Ik1ldGhvZCBOb3QgQWxsb3dlZCIsIm1lc3NhZ2UiOiJPbmx5IEdFVCByZXF1ZXN0cyBhcmUgYWNjZXB0ZWQifQ==" `
+                    -StatusCode            405
 
                 continue
             }
 
-            Write-Verbose "Processing a new HTTP request."
+            Write-Verbose "Processing a new HTTP request"
             if($request.RawUrl.TrimEnd('/').ToLower().EndsWith("ping")) {
-                Write-Verbose "Ping request detected. Sending pong response."
+                Write-Verbose "Ping request detected. Sending pong response"
                 Write-Response `
-                    -ContentType     "application/json; charset=utf-8" `
-                    -Response        $response `
-                    -ResponseContent '{"message": "pong"}'
+                    -ContentType           "application/json; charset=utf-8" `
+                    -Response              $response `
+                    -Base64ResponseContent "eyJtZXNzYWdlIjoicG9uZyJ9"
 
                 continue
             }
 
             # If query string parameters are present, notify that they will not be processed.
             if ($request.QueryString.Count -gt 0) {
-                Write-Verbose "Detected query string parameters. These parameters will be ignored by the listener."
+                Write-Verbose "Detected query string parameters. These parameters will be ignored by the listener"
             }
 
-            Write-Verbose "Invoking G4Bot with updated configuration."
-            Invoke-G4Bot `
+            Write-Verbose "Invoking G4Bot with updated configuration"
+            $botResponse = Invoke-G4Bot `
                 -BotVolume      $BotVolume `
                 -BotName        $BotName `
                 -DriverBinaries $DriverBinaries `
                 -HubUri         $HubUri `
                 -Token          $Token
 
-            Write-Verbose "Checking if ResponseContent is empty. Defaulting to an empty JSON object if necessary."
-            if ([string]::IsNullOrEmpty($ResponseContent)) {
-                Write-Verbose "ResponseContent is empty. Setting default value to '{}'."
-                $ResponseContent = "{}"
+            Write-Verbose "Checking if ResponseContent is empty. Defaulting to an empty JSON object if necessary"
+            if ([string]::IsNullOrEmpty($Base64ResponseContent)) {
+                Write-Verbose "ResponseContent is empty. Setting default value to '{}'"
+                $Base64ResponseContent = "e30="
             }
 
-            Write-Verbose "Sending response back to the client."
+            Write-Verbose "Sending response back to the client"
+            if($botResponse.StatusCode -gt 204) {
+                Write-Response `
+                    -ContentType           $botResponse.ContentType `
+                    -Response              $response `
+                    -Base64ResponseContent $botResponse.Base64Content `
+                    -StatusCode            $botResponse.StatusCode
+
+                continue
+            }
             Write-Response `
-                -ContentType     $ContentType `
-                -Response        $response `
-                -ResponseContent $ResponseContent
+                -ContentType           $ContentType `
+                -Response              $response `
+                -Base64ResponseContent $Base64ResponseContent
         }
         catch {
             # Continue on exception to the next iteration of the loop
-            Write-Warning "Exception in loop:" $_.Exception.Message
+            $baseException     = $_.Exception.GetBaseException()
+            $exceptionResponse = (@{ error = $baseException.StackTrace; message = $baseException.Message } | ConvertTo-Json -Depth 30 -Compress)
+            Write-Warning "Exception in loop: $($baseException.Message)"
             Write-Response `
                 -ContentType     $ContentType `
                 -Response        $response `
-                -ResponseContent (@{ error = "InternalServerError"; message = $_.Exception.Message } | ConvertTo-Json -Compress) `
+                -Base64ResponseContent ([System.Convert]::ToBase64String(([System.Text.Encoding]::UTF8.GetBytes($exceptionResponse)))) `
                 -StatusCode      500
+
             continue
         }
     }
 }
 catch [System.Net.HttpListenerException] {
-    Write-Error "HttpListener exception:" $_.Exception.Message
+    Write-Error "HttpListener exception:" $_.Exception.GetBaseException().Message
 }
 catch {
-    Write-Error "Exception:" $_.Exception.Message
+    Write-Error "Exception:" $_.Exception.GetBaseException().Message
 }
 finally {
-    Write-Verbose "Stopping and closing the HttpListener."
+    Write-Verbose "Stopping and closing the HttpListener"
     $listener.Stop()
     $listener.Close()
 }

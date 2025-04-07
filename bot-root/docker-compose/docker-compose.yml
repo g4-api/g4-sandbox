@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  g4-cron-bot:
+    image: g4-cron-bot:latest
+    deploy:
+      replicas: ${REPLICAS_CRON}
+    volumes:
+      - shared-bots-volume:/bots
+
+  g4-file-listener-bot:
+    image: g4-file-listener-bot:latest
+    deploy:
+      replicas: ${REPLICAS_FILE}
+    volumes:
+      - shared-bots-volume:/bots
+
+  g4-http-post-listner-bot:
+    image: g4-http-post-listner-bot:latest
+    deploy:
+      replicas: ${REPLICAS_HTTP_POST}
+    ports:
+      - target: 8080
+        published: ${PORT_HTTP_POST}
+        mode: ingress
+    volumes:
+      - shared-bots-volume:/bots
+
+  g4-http-qa-listner-bot:
+    image: g4-http-qa-listner-bot:latest
+    deploy:
+      replicas: ${REPLICAS_HTTP_QA}
+    ports:
+      - target: 8080
+        published: ${PORT_HTTP_QA}
+        mode: ingress
+    volumes:
+      - shared-bots-volume:/bots
+
+  g4-http-static-listener-bot:
+    image: g4-http-static-listener-bot:latest
+    deploy:
+      replicas: ${REPLICAS_HTTP_STATIC}
+    ports:
+      - target: 8080
+        published: ${PORT_HTTP_STATIC}
+        mode: ingress
+    volumes:
+      - shared-bots-volume:/bots
+
+  g4-static-bot:
+    image: g4-static-bot:latest
+    deploy:
+      replicas: ${REPLICAS_STATIC}
+    volumes:
+      - shared-bots-volume:/bots
+
+volumes:
+  shared-bots-volume:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${HOST_VOLUME_PATH}

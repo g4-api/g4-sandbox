@@ -34,65 +34,64 @@
 #>
 param (
     [CmdletBinding()]
-    [Parameter(Mandatory = $true)][string]$BotVolume,
-    [Parameter(Mandatory = $true)][string]$BotName,
-    [Parameter(Mandatory = $true)][string]$DriverBinaries,
-    [Parameter(Mandatory = $true)][string]$HubUri,
-    [Parameter(Mandatory = $true)][string]$IntervalTime,
-    [Parameter(Mandatory = $true)][string]$Token,
-    [switch]$Docker
+    [Parameter(Mandatory = $true)] [string]$BotVolume,
+    [Parameter(Mandatory = $true)] [string]$BotName,
+    [Parameter(Mandatory = $true)] [string]$DriverBinaries,
+    [Parameter(Mandatory = $true)] [string]$HubUri,
+    [Parameter(Mandatory = $true)] [string]$IntervalTime,
+    [Parameter(Mandatory = $true)] [string]$Token,
+    [Parameter(Mandatory = $false)][switch]$Docker
 )
 
 function Get-NextFile {
     <#
     .SYNOPSIS
-        Processes the latest file (CSV or JSON) from an input folder, converts CSV files to minified JSON if needed,
-        archives the file, and returns the minified JSON content.
+        Processes the most recent CSV or JSON file from an input folder, converts CSV files to minified JSON if needed,
+        archives the processed file, and returns the resulting minified JSON content.
 
     .DESCRIPTION
-        This function searches the specified InputDirectory for files with .csv or .json extensions and selects
-        the most recent one based on LastWriteTime. If the file is a CSV, it imports the data and converts it
-        to a JSON object; if it is a JSON file, it validates and then normalizes the JSON. In both cases, the
-        JSON output is minified using the -Compress parameter. Regardless of success or failure in processing,
-        the file is moved (archived) in the finally block. Any error encountered during the move is appended to
-        the Reason field. The function returns a custom object with:
-          - StatusCode: 200 for success, 404 if no file is found, or 500 if an error occurs.
-          - Content: The minified JSON content (either converted from CSV or validated JSON).
-          - Reason: A description of the outcome and any additional error messages.
+        This function searches the specified InputDirectory for files with a .csv or .json extension and selects the most
+        recent file based on LastWriteTime. If the file is a CSV, its content is imported and converted to a minified JSON
+        string. If the file is JSON, the content is read and validated by converting it to an object, then reserialized as
+        a minified JSON string. In both cases, if the JSON output is not an array, it is wrapped in an array format.
+        Regardless of processing success, the file is archived to ArchiveDirectory. The archived file name includes a
+        Session identifier to help track or differentiate processed files.
+        
+        The function returns a custom object containing:
+          - StatusCode: 200 on success, 404 if no files are found, or 500 if an error occurs.
+          - Content: The minified JSON string.
+          - Reason: A descriptive message indicating success or detailing any errors encountered.
 
     .PARAMETER InputDirectory
-        The folder path that serves as the queue where files (CSV or JSON) are dropped.
+        The folder path where CSV or JSON files are queued for processing.
 
     .PARAMETER ArchiveDirectory
-        The folder path where processed files should be archived.
+        The folder path where processed files are archived.
+
+    .PARAMETER Session
+        A unique identifier (e.g., a session ID) appended to the archived file name to ensure uniqueness and traceability.
 
     .EXAMPLE
-        PS C:\> $result = Get-NextFile -InputDirectory "C:\MyBot\input" -ArchiveDirectory "C:\MyBot\archive"
-        PS C:\> if ($result.StatusCode -eq 200) {
-                    Write-Host "Minified JSON content:`n$result.Content"
-                } else {
-                    Write-Host "Error: $($result.Reason)"
-                }
+        $result = Get-NextFile -InputDirectory "C:\MyBot\input" -ArchiveDirectory "C:\MyBot\archive" -Session "12345"
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$InputDirectory,
-
-        [Parameter(Mandatory = $true)]
-        [string]$ArchiveDirectory
+        [Parameter(Mandatory = $true)][string]$InputDirectory,
+        [Parameter(Mandatory = $true)][string]$ArchiveDirectory,
+        [Parameter(Mandatory = $true)][string]$Session
     )
 
-    # Initialize variables for the result object and the latest file reference
+    Write-Verbose "Initialize variables for the result object and the reference to the latest file found"
     $resultObject = $null
     $latestFile   = $null
 
     try {
-        # Retrieve all files with .csv or .json extensions from the InputDirectory
+        Write-Verbose "Retrieve all files in InputDirectory with .csv or .json extensions"
         $files = Get-ChildItem -Path $InputDirectory -File | Where-Object { $_.Extension -in ".csv", ".json" }
-
-        # If no file is found, return a 404 result immediately
+   
+        # If no file is found, return a result object with a 404 status.
         if (-not $files) {
+            Write-Verbose "No file is found, return a result object with a 404 status"
             $resultObject = [PSCustomObject]@{
                 StatusCode = 404
                 Content    = $null
@@ -101,20 +100,20 @@ function Get-NextFile {
             return $resultObject
         }
 
-        # Sort files by LastWriteTime (newest first) and select the latest file
+        Write-Verbose "Sort files by LastWriteTime in descending order and select the most recent one"
         $latestFile = $files | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-        # Process the file based on its extension
-        # Import CSV data and convert it to a minified JSON string
+        Write-Verbose "Process the file based on its extension"
         if ($latestFile.Extension -eq ".csv") {
-            $csvData = Import-Csv -Path $latestFile.FullName -Encoding UTF8
+            Write-Verbose "Import CSV data and convert it to a minified JSON string"
+            $csvData     = Import-Csv -Path $latestFile.FullName -Encoding UTF8
             $jsonContent = $csvData | ConvertTo-Json -Depth 3 -Compress
         }
         elseif ($latestFile.Extension -eq ".json") {
-            # Read the raw JSON content from the file
+            Write-Verbose "Read the entire JSON content from the file"
             $rawJson = [System.IO.File]::ReadAllText($latestFile.FullName, [System.Text.Encoding]::UTF8)
 
-            # Validate the JSON by attempting to convert it to an object
+            Write-Verbose "Validate the JSON by converting it into an object"
             try {
                 $jsonObject = $rawJson | ConvertFrom-Json
             }
@@ -122,19 +121,19 @@ function Get-NextFile {
                 throw "File $($latestFile.FullName) is not a valid JSON file."
             }
 
-            # Convert the JSON object back to a minified JSON string (ensuring it's an array)
+            Write-Verbose "Re-serialize the JSON object into a minified JSON string"
             $jsonContent = $jsonObject | ConvertTo-Json -Depth 10 -Compress
         }
         else {
             throw "Unsupported file type: $($latestFile.Extension)"
         }
 
-        # Check if the resulting JSON starts with '[' and ends with ']'
+        Write-Verbose "Ensure the JSON content is formatted as an array. If not, wrap it in an array"
         if ($jsonContent[0] -ne '[' -or $jsonContent[-1] -ne ']') {
             $jsonContent = "[$jsonContent]"
         }
 
-        # Set the result as a successful operation
+        Write-Verbose "Build the success result object"
         $resultObject = [PSCustomObject]@{
             StatusCode = 200
             Content    = $jsonContent
@@ -142,23 +141,30 @@ function Get-NextFile {
         }
     }
     catch {
-        # On error during processing, capture the error message and set a 500 status
+        Write-Verbose "Return a result object with a 500 status and include the error message"
         $resultObject = [PSCustomObject]@{
             StatusCode = 500
             Content    = $null
-            Reason     = $_.Exception.Message
+            Reason     = $_.Exception.GetBaseException().Message
         }
     }
     finally {
-        # In the finally block, attempt to move the processed file to the ArchiveDirectory
+        Write-Verbose "Attempt to archive the processed file"
         if ($latestFile -and (Test-Path -Path $latestFile.FullName)) {
             try {
+                # TODO: Rethink session in the file name
+                Write-Verbose "Construct the archive file name by appending the Session ID to ensure uniqueness"
+                $baseName        = [System.IO.Path]::GetFileNameWithoutExtension($latestFile.Name)
+                $extension       = [System.IO.Path]::GetExtension($latestFile.Name)
+                $archiveFileName = "$baseName-$Session$extension"
                 $archiveFilePath = Join-Path $ArchiveDirectory $latestFile.Name
+
+                Write-Verbose "Move the file to the ArchiveDirectory"
                 Move-Item -Path $latestFile.FullName -Destination $archiveFilePath -Force
             }
             catch {
-                # Append any error encountered during the move operation to the Reason field
-                $archiveError = "Failed to archive file: $($_.Exception.Message)"
+                Write-Verbose "Archiving failed, appending the error to the result object's Reason"
+                $archiveError = "Failed to archive file: $($_.Exception.GetBaseException().Message)"
                 if ($null -ne $resultObject) {
                     $resultObject.Reason += " | " + $archiveError
                 }
@@ -178,59 +184,57 @@ function Get-NextFile {
 function Import-EnvironmentVariablesFile {
     <#
     .SYNOPSIS
-        Imports environment variables from an environment file into the current session.
+        Imports environment variables from an environment file and additional parameters into the current session.
 
     .DESCRIPTION
-        This function reads an environment file (with each line in the format KEY=value),
-        splits each line on the first "=" occurrence (allowing values to contain additional "=" characters),
-        and assigns the variables to the current session's environment.
-        A list of environment variable names to skip can be provided, and those keys will not be imported.
+        This function reads an environment file (each line formatted as KEY=value) and splits each line on the first "=".
+        In addition, it accepts an array of additional environment variable strings (AdditionalEnvironmentVariables) in key=value format.
+        Both sets of key-value pairs are imported into the current session's environment.
+        Any keys specified in SkipNames are skipped.
 
     .PARAMETER EnvironmentFilePath
-        The full path to the environment file. Defaults to ".env" if not specified.
+        The full path to the environment file. Defaults to ".env" in the script's directory.
 
     .PARAMETER SkipNames
-        An array of environment variable names that should not be imported from the file.
+        An array of environment variable names that should not be imported from the file or the additional parameters.
 
+    .PARAMETER AdditionalEnvironmentVariables
+        An array of additional environment variable strings in key=value format.
+        
     .EXAMPLE
-        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME"
-        Imports environment variables from the specified file, skipping the variables named PATH and JAVA_HOME.
-
-    .EXAMPLE
-        Import-EnvironmentVariablesFile
-        Imports environment variables from a file named .env in the current directory.
+        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME" `
+            -AdditionalEnvironmentVariables @("MY_VAR=Value1", "OTHER_VAR=Value2")
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $false)]
-        [string]$EnvironmentFilePath = (Join-Path $PSScriptRoot ".env"),
-        
-        [Parameter(Mandatory = $false)]
-        [string[]]$SkipNames = @()
+        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
+        [string[]]$SkipNames                      = @(),
+        [string[]]$AdditionalEnvironmentVariables = @()
     )
 
-    # Check if the environment file exists; if not, display a message and exit.
+    Write-Verbose "Check if the environment file exists; if not, display a message and exit"
     if (-Not (Test-Path $EnvironmentFilePath)) {
         Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
         return
     }
 
-    # Read the environment file line by line.
-    Get-Content $EnvironmentFilePath -Force -Encoding UTF8 | ForEach-Object {
-        # Skip lines that are comments (starting with '#') or empty after trimming whitespace.
+    Write-Verbose "Read the environment file line by line"
+    $parametersCollection = (Get-Content $EnvironmentFilePath -Force -Encoding UTF8) + $AdditionalEnvironmentVariables
+    $parametersCollection | ForEach-Object {
+        Write-Verbose "Skip lines that are comments (starting with '#') or empty after trimming whitespace"
         if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
             return
         }
 
-        # Split the line into two parts at the first '=' occurrence.
+        Write-Verbose "Split the line into two parts at the first '=' occurrence"
         $parts = $_.Split('=', 2)
         
-        # If the line does not contain exactly two parts, skip it.
+        Write-Verbose "If the line does not contain exactly two parts, skip it"
         if ($parts.Length -ne 2) {
             return
         }
         
-        # Trim any leading or trailing whitespace from the key and value.
+        Write-Verbose "Trim any leading or trailing whitespace from the key and value"
         $key   = $parts[0].Trim()
         $value = $parts[1].Trim()
 
@@ -240,21 +244,13 @@ function Import-EnvironmentVariablesFile {
             return
         }
         
-        # Set the environment variable for the current process using Set-Item.
-        Set-Item -Path "Env:$key" -Value $value
-
-        # Write a verbose message showing the key-value pair that was set.
-        Write-Verbose "Set environment variable '$key' with value '$value'"
+        Write-Verbose "Set the environment variable for the current process using Set-Item"
+        Set-Item -Path "Env:$($key)" -Value $value
+        Write-Host "Set environment variable '$key' with value '$value'"
     }
 }
 
 function Wait-Interval {
-    [CmdletBinding()]
-    param(
-        [int]   $IntervalTime,
-        [string]$Message
-    )
-
     <#
     .SYNOPSIS
         Pauses script execution for a specified interval after displaying the next scheduled invocation time.
@@ -273,17 +269,21 @@ function Wait-Interval {
     .EXAMPLE
         Wait-Interval -Message "Next automation run scheduled at:" -IntervalTime 120
     #>
+    [CmdletBinding()]
+    param(
+        [int]   $IntervalTime,
+        [string]$Message
+    )
 
-    # Calculate the next scheduled time by adding the specified interval to the current date and time.
+    Write-Verbose "Calculate the next scheduled time by adding the specified interval to the current date and time"
     $nextAutomationTime = (Get-Date).AddSeconds($IntervalTime)
 
-    # Format the calculated time in ISO 8601 format.
+    Write-Verbose "Format the calculated time in ISO 8601 format"
     $isoNextAutomation = $nextAutomationTime.ToString("o")
 
-    # Display the custom message along with the formatted next invocation time.
     Write-Verbose "$Message$isoNextAutomation"
 
-    # Pause execution for the specified interval.
+    Write-Verbose "Pause execution for the specified interval"
     Start-Sleep -Seconds $IntervalTime
 }
 
@@ -304,7 +304,7 @@ if ($Docker) {
     }
     catch {
         # Output error message and exit with a non-zero code if the Docker container fails to start.
-        Write-Error "Failed to start Docker container '$($BotName)': $_"
+        Write-Error "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
         Exit 1
     }
 }
@@ -314,7 +314,7 @@ try {
     Import-EnvironmentVariablesFile -Verbose
 }
 catch {
-    Write-Error "Failed to set environment parameters: $_"
+    Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
 
 # Construct the request URI by ensuring no trailing slash exists and appending the API endpoint.
@@ -332,7 +332,12 @@ Write-Host
 Write-Host "Listening for incoming files for bot '$BotName' in directory '$inputDirectory'.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
 
 # Main loop: Continuously process available files and invoke the remote automation endpoint.
-while ($true) {   
+while ($true) {
+   # Construct file paths for output and error logs.
+   $session        = (Get-Date).ToString("yyyyMMddHHmmssfff")
+   $outputFilePath = [System.IO.Path]::Combine($outputDirectory, "$($BotName)-$($session).json")
+   $errorsPath     = [System.IO.Path]::Combine($BotVolume, $BotName, "errors", "$($BotName)-$($session).json")
+
     try {
         # Check if the 'automation.json' configuration file exists in the bot automation directory.
         if (-Not (Test-Path $botFilePath)) {
@@ -342,7 +347,7 @@ while ($true) {
         }
 
         Write-Verbose "Searching for the next file to process in '$inputDirectory'..."
-        $nextFile = Get-NextFile -InputDirectory $inputDirectory -ArchiveDirectory $archiveDirectory
+        $nextFile = Get-NextFile -InputDirectory $inputDirectory -ArchiveDirectory $archiveDirectory -Session $session
 
         # If no valid file is found, log the reason and wait for the next check.
         if ($nextFile.StatusCode -gt 200) {
@@ -350,11 +355,6 @@ while ($true) {
             Wait-Interval -Message "Next check scheduled at:" -IntervalTime $IntervalTime
             continue
         }
-
-        # Construct file paths for output and error logs.
-        $session        = (Get-Date).ToString("yyyyMMddHHmmssfff")
-        $outputFilePath = [System.IO.Path]::Combine($outputDirectory, "$($BotName)-$($session).json")
-        $errorsPath     = [System.IO.Path]::Combine($BotVolume, $BotName, "errors", "$($BotName)-$($session).json")
 
         # Happy flow: a file was found. Display the indicator using Write-Host.
         Write-Host "Processing session: $session"
@@ -390,18 +390,20 @@ while ($true) {
         $response = Invoke-RestMethod -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
     }
     catch {
-        Write-Error "An error occurred during processing. Check error log at: $errorsPath. Error details: $_"
-        @{ error = "InternalServerError"; message = $_.Exception.Message } | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
+        # If an error occurs, display a message and log the error details to the designated errors file.
+        $baseException = $_.Exception.GetBaseException()
+        Write-Error "An error occurred '$($baseException.Message)'.$([System.Environment]::NewLine)Check $errorsPath for details."
+        @{ error = $baseException.StackTrace; message = $baseException.Message } | ConvertTo-Json -Compress | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
     }
-    finally {      
+    finally {
         try {
-            if(Test-Path $outputFilePath) {
+            if($null -ne $outputFilePath -and $response) {
                 $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
-                Write-Verbose "Response successfully saved to: $outputFilePath"   
+                Write-Verbose "Response successfully saved to: $outputFilePath"
             }
         }
         catch {
-            Write-Error "Failed to save response to: $outputFilePath. Error details: $_"
+            Write-Error "Failed to save response to: $outputFilePath. Error details: $($_.Exception.GetBaseException().Message)"
         }
     }
 

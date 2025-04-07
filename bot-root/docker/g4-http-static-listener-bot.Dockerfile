@@ -28,7 +28,7 @@ RUN echo "BOT_NAME: ${BOT_NAME}" && \
     echo "CONTENT_TYPE: ${CONTENT_TYPE}" && \
     echo "DRIVER_BINARIES: ${DRIVER_BINARIES}" && \
     echo "HUB_URI: ${HUB_URI}" && \
-    echo "RESPONSE_CONTENT: ${RESPONSE_CONTENT}" && \
+    echo "BASE64_RESPONSE_CONTENT: ${BASE64_RESPONSE_CONTENT}" && \
     echo "TOKEN: ${TOKEN}"
 
 # Create the /bots directory and ensure it has read/write permissions
@@ -49,4 +49,4 @@ RUN chmod +x /app/Start-HttpStaticListenerBot.ps1
 #   2) BotName from environment variable
 #   3) HubUri from environment variable
 #   4) IntervalTime from environment variable
-CMD ["pwsh", "-Command", "./Start-HttpStaticListenerBot.ps1 -BotVolume '/bots' -BotName $env:BOT_NAME -HostPort $env:BOT_PORT -ContentType $env:CONTENT_TYPE -DriverBinaries $env:DRIVER_BINARIES -HubUri $env:HUB_URI -ResponseContent $env:RESPONSE_CONTENT -Token $env:TOKEN"]
+CMD ["pwsh", "-Command", "./Start-HttpStaticListenerBot.ps1 -BotVolume '/bots' -BotName $env:BOT_NAME -HostPort $env:BOT_PORT -ContentType $env:CONTENT_TYPE -DriverBinaries $env:DRIVER_BINARIES -HubUri $env:HUB_URI -Base64ResponseContent $env:BASE64_RESPONSE_CONTENT -Token $env:TOKEN"]

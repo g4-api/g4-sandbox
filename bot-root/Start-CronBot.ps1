@@ -59,59 +59,57 @@ param (
 function Import-EnvironmentVariablesFile {
     <#
     .SYNOPSIS
-        Imports environment variables from an environment file into the current session.
+        Imports environment variables from an environment file and additional parameters into the current session.
 
     .DESCRIPTION
-        This function reads an environment file (with each line in the format KEY=value),
-        splits each line on the first "=" occurrence (allowing values to contain additional "=" characters),
-        and assigns the variables to the current session's environment.
-        A list of environment variable names to skip can be provided, and those keys will not be imported.
+        This function reads an environment file (each line formatted as KEY=value) and splits each line on the first "=".
+        In addition, it accepts an array of additional environment variable strings (AdditionalEnvironmentVariables) in key=value format.
+        Both sets of key-value pairs are imported into the current session's environment.
+        Any keys specified in SkipNames are skipped.
 
     .PARAMETER EnvironmentFilePath
-        The full path to the environment file. Defaults to ".env" if not specified.
+        The full path to the environment file. Defaults to ".env" in the script's directory.
 
     .PARAMETER SkipNames
-        An array of environment variable names that should not be imported from the file.
+        An array of environment variable names that should not be imported from the file or the additional parameters.
 
+    .PARAMETER AdditionalEnvironmentVariables
+        An array of additional environment variable strings in key=value format.
+        
     .EXAMPLE
-        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME"
-        Imports environment variables from the specified file, skipping the variables named PATH and JAVA_HOME.
-
-    .EXAMPLE
-        Import-EnvironmentVariablesFile
-        Imports environment variables from a file named .env in the current directory.
+        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME" `
+            -AdditionalEnvironmentVariables @("MY_VAR=Value1", "OTHER_VAR=Value2")
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $false)]
-        [string]$EnvironmentFilePath = (Join-Path $PSScriptRoot ".env"),
-        
-        [Parameter(Mandatory = $false)]
-        [string[]]$SkipNames = @()
+        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
+        [string[]]$SkipNames                      = @(),
+        [string[]]$AdditionalEnvironmentVariables = @()
     )
 
-    # Check if the environment file exists; if not, display a message and exit.
+    Write-Verbose "Check if the environment file exists; if not, display a message and exit"
     if (-Not (Test-Path $EnvironmentFilePath)) {
         Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
         return
     }
 
-    # Read the environment file line by line.
-    Get-Content $EnvironmentFilePath -Force -Encoding UTF8 | ForEach-Object {
-        # Skip lines that are comments (starting with '#') or empty after trimming whitespace.
+    Write-Verbose "Read the environment file line by line"
+    $parametersCollection = (Get-Content $EnvironmentFilePath -Force -Encoding UTF8) + $AdditionalEnvironmentVariables
+    $parametersCollection | ForEach-Object {
+        Write-Verbose "Skip lines that are comments (starting with '#') or empty after trimming whitespace"
         if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
             return
         }
 
-        # Split the line into two parts at the first '=' occurrence.
+        Write-Verbose "Split the line into two parts at the first '=' occurrence"
         $parts = $_.Split('=', 2)
         
-        # If the line does not contain exactly two parts, skip it.
+        Write-Verbose "If the line does not contain exactly two parts, skip it"
         if ($parts.Length -ne 2) {
             return
         }
         
-        # Trim any leading or trailing whitespace from the key and value.
+        Write-Verbose "Trim any leading or trailing whitespace from the key and value"
         $key   = $parts[0].Trim()
         $value = $parts[1].Trim()
 
@@ -121,11 +119,9 @@ function Import-EnvironmentVariablesFile {
             return
         }
         
-        # Set the environment variable for the current process using Set-Item.
-        Set-Item -Path "Env:$key" -Value $value
-
-        # Write a verbose message showing the key-value pair that was set.
-        Write-Verbose "Set environment variable '$key' with value '$value'"
+        Write-Verbose "Set the environment variable for the current process using Set-Item"
+        Set-Item -Path "Env:$($key)" -Value $value
+        Write-Host "Set environment variable '$key' with value '$value'"
     }
 }
 
@@ -146,7 +142,7 @@ if ($Docker) {
     }
     catch {
         # If an error occurs while starting the Docker container, output the error and exit with a non-zero code.
-        Write-Error "Failed to start Docker container '$($BotName)': $_"
+        Write-Error "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
         Exit 1
     }
 }
@@ -156,7 +152,7 @@ try {
     Import-EnvironmentVariablesFile -SkipNames @("BOT_NAME", "CRON_SCHEDULES", "DRIVER_BINARIES", "HUB_URI", "TOKEN")   
 }
 catch {
-    Write-Error "Failed to set environment parameters: $_"
+    Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
 
 # Build the final request URL by removing any trailing slash from $HubUri and appending the endpoint path.
@@ -217,16 +213,19 @@ try {
     $response = Invoke-RestMethod -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
 }
 catch {
-    # If an error occurs during processing, output a message and log the error details to the errors file.
-    Write-Error "An error occurred during processing. Check the error file at '$errorsPath' for details."
-    @{ error = "InternalServerError"; message = $_.Exception.Message } | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
+    # If an error occurs, display a message and log the error details to the designated errors file.
+    $baseException = $_.Exception.GetBaseException()
+    Write-Error "An error occurred '$($baseException.Message)'.$([System.Environment]::NewLine)Check $errorsPath for details."
+    @{ error = $baseException.StackTrace; message = $baseException.Message } | ConvertTo-Json -Compress | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
 }
 finally {
     try {
-        $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
-        Write-Verbose "Response successfully saved to: $outputFilePath"
+        if($null -ne $outputFilePath -and $response) {
+            $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
+            Write-Verbose "Response successfully saved to: $outputFilePath"
+        }
     }
     catch {
-        Write-Warning "Failed to save response to: $outputFilePath. Error details: $_"
+        Write-Error "Failed to save response to: $outputFilePath. Error details: $($_.Exception.GetBaseException().Message)"
     }
 }

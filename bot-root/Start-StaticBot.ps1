@@ -41,18 +41,23 @@
 .PARAMETER Token
     The authentication token required for the bot's operation. This token is inserted into the automation JSON.
 
+.PARAMETER RetentionThreshold
+    (Optional) The number of recent responses to retain. Older files beyond this threshold may be deleted.
+
 .PARAMETER Docker
     Switch to run the script inside a Docker container. When specified, the script will launch a Docker container
     using the given parameters and then exit.
-
-.PARAMETER EnvironmentVariables
-    An array of strings in key=value format to define additional environment variables.
-    These values will be processed along with variables loaded from the .env file.
     
 .EXAMPLE
-    .\LoopScript.ps1 -BotVolume "E:\Garbage\bot-volume" -BotName "demo-bot" -DriverBinaries "http://host.k8s.internal" `
-       -HubUri "http://host.docker.internal:9944" -IntervalTime 120 -Token "your_token" -Docker `
-       -EnvironmentVariables @("MY_VAR=Value1", "ANOTHER_VAR=Value2")
+    .\Start-StaticBot.ps1 `
+        -BotVolume "C:\g4-bots-volume" `
+        -BotName "g4-static-bot" `
+        -DriverBinaries "http://host.k8s.internal" `
+        -HubUri "http://host.docker.internal:9944" `
+        -IntervalTime 120 `
+        -Token "your_token" `
+        -RetentionThreshold 100 `
+        -Docker
 #>
 param (
     [CmdletBinding()]
@@ -91,57 +96,46 @@ function Import-EnvironmentVariablesFile {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $false)]
-        [string]$EnvironmentFilePath = (Join-Path $PSScriptRoot ".env"),
-        
-        [Parameter(Mandatory = $false)]
-        [string[]]$SkipNames = @(),
-
-        [Parameter(Mandatory = $false)]
+        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
+        [string[]]$SkipNames                      = @(),
         [string[]]$AdditionalEnvironmentVariables = @()
     )
 
-    # Process the environment file if it exists.
-    if (Test-Path $EnvironmentFilePath) {
-        Get-Content $EnvironmentFilePath -Force -Encoding UTF8 | ForEach-Object {
-            if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
-                return
-            }
-            $parts = $_.Split('=', 2)
-            if ($parts.Length -ne 2) {
-                return
-            }
-            $key   = $parts[0].Trim()
-            $value = $parts[1].Trim()
-            if ($SkipNames -contains $key) {
-                Write-Verbose "Skipping environment variable '$key' as it is in the skip list."
-                return
-            }
-            Set-Item -Path "Env:$key" -Value $value
-            Write-Verbose "Set environment variable '$key' with value '$value'"
-        }
-    }
-    else {
+    Write-Verbose "Check if the environment file exists; if not, display a message and exit"
+    if (-Not (Test-Path $EnvironmentFilePath)) {
         Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
+        return
     }
 
-    # Process additional environment variables passed via the parameter.
-    $AdditionalEnvironmentVariables | ForEach-Object {
-        if ([string]::IsNullOrWhiteSpace($_.Trim())) {
+    Write-Verbose "Read the environment file line by line"
+    $parametersCollection = (Get-Content $EnvironmentFilePath -Force -Encoding UTF8) + $AdditionalEnvironmentVariables
+    $parametersCollection | ForEach-Object {
+        Write-Verbose "Skip lines that are comments (starting with '#') or empty after trimming whitespace"
+        if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
             return
         }
+
+        Write-Verbose "Split the line into two parts at the first '=' occurrence"
         $parts = $_.Split('=', 2)
+        
+        Write-Verbose "If the line does not contain exactly two parts, skip it"
         if ($parts.Length -ne 2) {
             return
         }
+        
+        Write-Verbose "Trim any leading or trailing whitespace from the key and value"
         $key   = $parts[0].Trim()
         $value = $parts[1].Trim()
+
+        # Skip this key if it is in the skip list.
         if ($SkipNames -contains $key) {
             Write-Verbose "Skipping environment variable '$key' as it is in the skip list."
             return
         }
-        Set-Item -Path "Env:$key" -Value $value
-        Write-Verbose "Set additional environment variable '$key' with value '$value'"
+        
+        Write-Verbose "Set the environment variable for the current process using Set-Item"
+        Set-Item -Path "Env:$($key)" -Value $value
+        Write-Host "Set environment variable '$key' with value '$value'"
     }
 }
 
@@ -184,12 +178,8 @@ function Wait-Interval {
     Start-Sleep -Seconds $IntervalTime
 }
 
-# If the Docker switch is specified, start a Docker container with the given parameters and exit.
 if ($Docker) {
     try {
-        # Launch the Docker container:
-        # - Mount the BotVolume to /bots in the container.
-        # - Pass the required environment variables to configure the bot.
         docker run -d -v "$($BotVolume):/bots" `
             -e BOT_NAME="$($BotName)" `
             -e DRIVER_BINARIES="$($DriverBinaries)" `
@@ -202,8 +192,7 @@ if ($Docker) {
         Exit 0
     }
     catch {
-        # If an error occurs while starting Docker, output the error message and exit with a non-zero code.
-        Write-Error "Failed to start Docker container '$($BotName)': $_"
+        Write-Error "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
         Exit 1
     }
 }
@@ -213,25 +202,21 @@ try {
     Import-EnvironmentVariablesFile -Verbose
 }
 catch {
-    Write-Error "Failed to set environment parameters: $_"
+    Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
 
 # Construct the full request URL by trimming any trailing slash from $HubUri and appending the endpoint path.
 $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
 
-# Define the path to the output directory where responses will be saved.
-$outputDirectory = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
-
-Write-Host
-Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
-
-# Build the complete path to the bot's automation file:
-# 1. Combine $BotVolume and $BotName to form the bot directory.
-# 2. Append "bot" to locate the bot automation subdirectory.
-# 3. Append "automation.json" to form the full file path.
+# Build the complete path to the bot's information directories
 $botDirectory           = Join-Path $BotVolume $BotName
 $botAutomationDirectory = Join-Path $botDirectory "bot"
 $botFilePath            = Join-Path $botAutomationDirectory "automation.json"
+$errorsDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "errors")
+$outputDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
+
+Write-Host
+Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
 
 while ($true) {
     try {
@@ -251,7 +236,7 @@ while ($true) {
         $outputFilePath = [System.IO.Path]::Combine($outputDirectory, "$($BotName)-$($session).json")
         
         # Construct the error log file path within the 'errors' directory using the session timestamp.
-        $errorsPath = [System.IO.Path]::Combine($BotVolume, $BotName, "errors", "$($BotName)-$($session).json")
+        $errorsPath = Join-Path $errorsDirectory "$($BotName)-$($session).json"
         
         # Read the entire content of 'automation.json' as raw text.
         $botFileContent = [System.IO.File]::ReadAllText($botFilePath, [System.Text.Encoding]::UTF8)
@@ -279,18 +264,19 @@ while ($true) {
     }
     catch {
         # If an error occurs, display a message and log the error details to the designated errors file.
-        Write-Error "An error occurred. Check $errorsPath for details."
-        "Error: $_" | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
+        $baseException = $_.Exception.GetBaseException()
+        Write-Error "An error occurred '$($baseException.Message)'.$([System.Environment]::NewLine)Check $errorsPath for details."
+        @{ error = $baseException.StackTrace; message = $baseException.Message } | ConvertTo-Json -Compress | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
     }
     finally {
         try {
-            if($null -ne $outputFilePath) {
+            if($null -ne $outputFilePath -and $response) {
                 $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
-                Write-Verbose "Response successfully saved to: $outputFilePath"   
+                Write-Verbose "Response successfully saved to: $outputFilePath"
             }
         }
         catch {
-            Write-Error "Failed to save response to: $outputFilePath. Error details: $_"
+            Write-Error "Failed to save response to: $outputFilePath. Error details: $($_.Exception.GetBaseException().Message)"
         }
     }
 

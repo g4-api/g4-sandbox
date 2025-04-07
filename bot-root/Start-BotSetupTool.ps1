@@ -1147,11 +1147,11 @@ function Start-HttpListenerBotWizard {
             Name             = "HubUri"
         },
         [ordered]@{
-            Default          = '{\"message\": \"success\"}'
-            Description      = "The default HTTP response content (e.g., '{\`"message\`": \`"success\`"}')."
-            EnvironmentValue = $env:RESPONSE_CONTENT
+            Default          = 'eyJtZXNzYWdlIjogInN1Y2Nlc3MifQ=='
+            Description      = "The default HTTP response content (e.g., 'eyJtZXNzYWdlIjogInN1Y2Nlc3MifQ==')."
+            EnvironmentValue = $env:BASE64_RESPONSE_CONTENT
             Mandatory        = $false
-            Name             = "ResponseContent"
+            Name             = "Base64ResponseContent"
         },
         [ordered]@{
             Default          = ""

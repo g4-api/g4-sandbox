@@ -1,0 +1,22 @@
+Using the manifest for the Assert plugin, generate a RAG-optimized context snippet that includes a "rag" field under "context > integration". The "rag" field must include:
+
+1. A **description** written in professional, functional terms from an automation user’s perspective. It should explain that the Assert plugin validates critical conditions in automated workflows by ensuring that key UI elements and data values meet predefined expectations. Emphasize that it supports dynamic condition checks and flexible operators, which together maintain process reliability and integrity.
+
+2. A **qa** array with question-and-answer pairs covering the following topics:
+   - **Basic Overview:**  
+     - For example, "What is the Assert plugin?" and "How does the Assert plugin enhance workflow reliability?"
+   - **Key Features and Parameters:**  
+     - Questions that explain its flexible assertions, regex-based extraction, dynamic condition checks, and robust exception management.  
+     - Include questions on the primary parameters ("Condition", "Expected", "Operator") and configurable properties ("Argument", "Locator", "OnAttribute", "OnElement", "RegularExpression").
+   - **Integration Context:**  
+     - Questions clarifying that context integration is a mechanism for embedding the plugin into external tools (such as the sequential-workflow-designer) to facilitate connectivity with external systems.
+   - **Usage Best Practices:**  
+     - Questions addressing configuration best practices, optimizing workflows, and troubleshooting assertion failures.
+   - **Assert Rule Schema Details:**  
+     - Questions covering the structure of assert rules found under the examples section.  
+     - These should include how fields like "argument", "onElement", "onAttribute", "locator", "regularExpression", and "pluginName" define the rule.
+     - Include an example explanation that shows a sample assert rule JSON with a "$type": "Action" field, and describe its components.
+   - **Manifest Details (excluding summary and examples):**  
+     - Cover details like the manifest version, author information, supported categories, and platforms.
+
+Return the output in JSON format that renders only the updated "context > integration > rag" field with its "description" and "qa" entries.
