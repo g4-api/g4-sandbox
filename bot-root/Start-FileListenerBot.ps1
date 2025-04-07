@@ -214,7 +214,7 @@ function Import-EnvironmentVariablesFile {
 
     Write-Verbose "Check if the environment file exists; if not, display a message and exit"
     if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
+        Write-Warning "The environment file was not found at path: $($EnvironmentFilePath)"
         return
     }
 
@@ -240,13 +240,12 @@ function Import-EnvironmentVariablesFile {
 
         # Skip this key if it is in the skip list.
         if ($SkipNames -contains $key) {
-            Write-Verbose "Skipping environment variable '$key' as it is in the skip list."
+            Write-Verbose "Skipping environment variable '$($key)' as it is in the skip list"
             return
         }
         
-        Write-Verbose "Set the environment variable for the current process using Set-Item"
         Set-Item -Path "Env:$($key)" -Value $value
-        Write-Host "Set environment variable '$key' with value '$value'"
+        Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
     }
 }
 
@@ -290,20 +289,29 @@ function Wait-Interval {
 # If the Docker switch is specified, launch a Docker container with the given parameters and exit.
 if ($Docker) {
     try {
-        Write-Host "Docker mode enabled. Attempting to launch Docker container..."
-        docker run -d -v "$($BotVolume):/bots" `
-            -e BOT_NAME="$($BotName)" `
-            -e DRIVER_BINARIES="$($DriverBinaries)" `
-            -e HUB_URI="$($HubUri)" `
-            -e INTERVAL_TIME="$($IntervalTime)" `
-            -e TOKEN="$($Token)" `
-            --name "$($BotName)-$([guid]::NewGuid())" g4-file-listener-bot:latest
+        Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$($BotName)'."
+        Write-Verbose "Building the Docker command from the specified parameters."
+        $cmdLines = @(
+            "run -d -v `"$($BotVolume):/bots`"",
+            " -e BOT_NAME=`"$($BotName)`"",
+            " -e DRIVER_BINARIES=`"$($DriverBinaries)`"",
+            " -e HUB_URI=`"$($HubUri)`"",
+            " -e INTERVAL_TIME=`"$($IntervalTime)`"",
+            " -e TOKEN=`"$($Token)`"",
+            " --name `"$($BotName)-$([guid]::NewGuid())`" g4-file-listener-bot:latest"
+        )
+
+        Write-Verbose "Joining command parts into a single Docker command string."
+        $dockerCmd = $cmdLines -join [string]::Empty
+
+        Write-Host "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
+        $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
+        $process.WaitForExit(60000)
 
         Write-Verbose "Docker container '$($BotName)' started successfully."
         Exit 0
     }
     catch {
-        # Output error message and exit with a non-zero code if the Docker container fails to start.
         Write-Error "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
         Exit 1
     }
@@ -311,11 +319,23 @@ if ($Docker) {
 
 try {
     Write-Verbose "Setting Environment Parameters"
-    Import-EnvironmentVariablesFile -Verbose
+    Import-EnvironmentVariablesFile
 }
 catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
+
+Write-Verbose "Constructing the command line for 'Start-FileListenerBot.ps1' with the user parameters"
+$cmdLines = @(
+    ".\Start-FileListenerBot.ps1",
+    "-BotVolume `"$($BotVolume)`"",
+    "-BotName `"$($BotName)`"",
+    "-DriverBinaries `"$($DriverBinaries)`"",
+    "-HubUri `"$($HubUri)`"",
+    "-IntervalTime $($IntervalTime)",
+    "-Token `"$($Token)`""
+) -join " "
+Write-Host "Invoking Process with the following command:$([System.Environment]::NewLine)$($cmdLines)"
 
 # Construct the request URI by ensuring no trailing slash exists and appending the API endpoint.
 $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"

@@ -1,62 +1,62 @@
 ﻿<#
 .SYNOPSIS
-Starts an HTTP listener bot that processes incoming GET requests and triggers the G4Bot automation process.
+    Starts an HTTP listener bot that processes incoming GET requests and triggers the G4Bot automation process.
 
 .DESCRIPTION
-This script sets up an HTTP listener to handle incoming GET requests for a bot. When a request is received, the
-listener processes it as follows:
-  1. For requests ending in "/ping", the script returns a simple "pong" JSON response.
-  2. For all other GET requests, any query string parameters are ignored.
-  3. The script invokes the G4Bot automation process, which updates an automation configuration file with new driver 
-     binaries and an authentication token, encodes the updated configuration in Base64, and sends it via an HTTP POST 
-     request to a remote hub endpoint.
-  4. The response from the remote endpoint is logged to an output file, and any errors are logged to a separate error file.
+    This script sets up an HTTP listener to handle incoming GET requests for a bot. When a request is received, the
+    listener processes it as follows:
+      1. For requests ending in "/ping", the script returns a simple "pong" JSON response.
+      2. For all other GET requests, any query string parameters are ignored.
+      3. The script invokes the G4Bot automation process, which updates an automation configuration file with new driver 
+         binaries and an authentication token, encodes the updated configuration in Base64, and sends it via an HTTP POST 
+         request to a remote hub endpoint.
+      4. The response from the remote endpoint is logged to an output file, and any errors are logged to a separate error file.
   
-Optionally, if the `-Docker` switch is specified, the script will launch the bot inside a Docker container with the 
-provided parameters instead of starting the HTTP listener directly.
+    Optionally, if the `-Docker` switch is specified, the script will launch the bot inside a Docker container with the 
+    provided parameters instead of starting the HTTP listener directly.
 
 .PARAMETER BotVolume
-The base directory where the bot's folders (such as output, errors, and bot configuration) are located.
+    The base directory where the bot's folders (such as output, errors, and bot configuration) are located.
 
 .PARAMETER BotName
-The name of the bot. This value is used to construct file paths and log filenames.
+    The name of the bot. This value is used to construct file paths and log filenames.
 
 .PARAMETER HostPort
-The port on which the HTTP listener will run. Default is 8080.
+    The port on which the HTTP listener will run. Default is 8080.
 
 .PARAMETER ContentType
-The MIME type for the HTTP response. Default is "application/json; charset=utf-8".
+    The MIME type for the HTTP response. Default is "application/json; charset=utf-8".
 
 .PARAMETER DriverBinaries
-The URL or information for the driver binaries to update in the automation configuration.
+    The URL or information for the driver binaries to update in the automation configuration.
 
 .PARAMETER HubUri
-The base URI of the hub to which the updated automation configuration will be sent.
+    The base URI of the hub to which the updated automation configuration will be sent.
 
-.PARAMETER ResponseContent
-The default response content that will be returned to the client if not modified by the automation process.
-Default is '{"message": "success"}'.
+.PARAMETER Base64ResponseContent
+    The default response content that will be returned to the client if not modified by the automation process.
+    Default is '{"message": "success"}'.
 
 .PARAMETER Token
-The authentication token used to update the automation configuration at the remote endpoint.
+    The authentication token used to update the automation configuration at the remote endpoint.
 
 .PARAMETER Docker
-A switch indicating whether the bot should be run inside a Docker container. If specified, the script launches
-a Docker container with the provided parameters and exits.
+    A switch indicating whether the bot should be run inside a Docker container. If specified, the script launches
+    a Docker container with the provided parameters and exits.
 
 .EXAMPLE
-Start-HttpQsListenerBot.ps1 -BotVolume "C:\Bots" -BotName "MyBot" -HostPort 8080 `
-    -ContentType "application/json" -DriverBinaries "http://host.docker.internal:4444/wd/hub" `
-    -HubUri "http://host.docker.internal:9944" -Base64ResponseContent "{}" -Token "my-token"
+    Start-HttpQsListenerBot.ps1 -BotVolume "C:\Bots" -BotName "MyBot" -HostPort 8080 `
+        -ContentType "application/json" -DriverBinaries "http://host.docker.internal:4444/wd/hub" `
+        -HubUri "http://host.docker.internal:9944" -Base64ResponseContent "{}" -Token "my-token"
 
-Starts the bot listener on port 8080 with the specified parameters.
+    Starts the bot listener on port 8080 with the specified parameters.
 
 .EXAMPLE
-Start-HttpQsListenerBot.ps1 -BotVolume "C:\Bots" -BotName "MyBot" -HostPort 8080 `
-    -ContentType "application/json" -DriverBinaries "http://host.docker.internal:4444/wd/hub" `
-    -HubUri "http://host.docker.internal:9944" -Base64ResponseContent "{}" -Token "my-token" -Docker
+    Start-HttpQsListenerBot.ps1 -BotVolume "C:\Bots" -BotName "MyBot" -HostPort 8080 `
+        -ContentType "application/json" -DriverBinaries "http://host.docker.internal:4444/wd/hub" `
+        -HubUri "http://host.docker.internal:9944" -Base64ResponseContent "{}" -Token "my-token" -Docker
 
-Runs the bot inside a Docker container using the specified parameters.
+    Runs the bot inside a Docker container using the specified parameters.
 #>
 param (
     [CmdletBinding()]
@@ -74,35 +74,35 @@ param (
 function Invoke-G4Bot {
     <#
     .SYNOPSIS
-    Updates the automation configuration and initiates the G4Bot process via a remote endpoint.
+        Updates the automation configuration and initiates the G4Bot process via a remote endpoint.
 
     .DESCRIPTION
-    This function performs the following steps to trigger the G4Bot automation process:
-      1. Generates a unique session identifier based on the current date and time.
-      2. Constructs file paths for output, bot configuration, and error logs.
-      3. Reads and parses the existing "automation.json" configuration file.
-      4. Updates the configuration with new driver binaries and an authentication token.
-      5. Serializes the updated configuration into JSON, encodes it in Base64, and sends it via an HTTP POST request 
-         to the remote hub endpoint.
-      6. Logs the response or any errors to designated output and error log files.
+        This function performs the following steps to trigger the G4Bot automation process:
+          1. Generates a unique session identifier based on the current date and time.
+          2. Constructs file paths for output, bot configuration, and error logs.
+          3. Reads and parses the existing "automation.json" configuration file.
+          4. Updates the configuration with new driver binaries and an authentication token.
+          5. Serializes the updated configuration into JSON, encodes it in Base64, and sends it via an HTTP POST request 
+             to the remote hub endpoint.
+          6. Logs the response or any errors to designated output and error log files.
     
     .PARAMETER BotVolume
-    The base directory where the bot's folders (e.g., output, errors) are located.
+        The base directory where the bot's folders (e.g., output, errors) are located.
 
     .PARAMETER BotName
-    The name of the bot; used to construct file paths and log filenames.
+        The name of the bot; used to construct file paths and log filenames.
 
     .PARAMETER DriverBinaries
-    The driver binaries configuration to update in the automation file.
+        The driver binaries configuration to update in the automation file.
 
     .PARAMETER HubUri
-    The base URI of the hub to which the updated automation configuration is sent.
+        The base URI of the hub to which the updated automation configuration is sent.
 
     .PARAMETER Token
-    The authentication token required to update the configuration at the remote endpoint.
+        The authentication token required to update the configuration at the remote endpoint.
 
     .OUTPUTS
-    Returns the response received from the remote endpoint after sending the updated configuration.
+        Returns the response received from the remote endpoint after sending the updated configuration.
     #>
     param(
         $BotVolume,
@@ -240,7 +240,6 @@ function Import-EnvironmentVariablesFile {
             return
         }
         
-        Write-Verbose "Set the environment variable for the current process using Set-Item"
         Set-Item -Path "Env:$($key)" -Value $value
         Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
     }
@@ -308,7 +307,7 @@ $botEndpoint = "http://+:$($HostPort)$($botRoute)/$BotName"
 # If the Docker switch is specified, launch a Docker container with the given parameters and exit.
 if ($Docker) {
     try {
-        Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$BotName'."
+        Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$($BotName)'."
         Write-Verbose "Launching Docker container with: Port mapping '$($HostPort):8080', Volume mapping '$($BotVolume):/bots'."
         Write-Verbose "Building the Docker command from the specified parameters."
         $cmdLines = @(
@@ -327,7 +326,9 @@ if ($Docker) {
         $dockerCmd = $cmdLines -join [string]::Empty
 
         Write-Host "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
-        Start-Process -FilePath "docker" -ArgumentList $dockerCmd -Wait
+        $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
+        $process.WaitForExit(60000)
+        
         Write-Host "Docker container for bot '$($BotName)' launched successfully."
         Exit 0
     }
@@ -345,7 +346,7 @@ catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException())"
 }
 
-Write-Verbose "Constructing the command line for Start-HttpStaticListenerBot.ps1 with the user parameters"
+Write-Verbose "Constructing the command line for 'Start-HttpStaticListenerBot.ps1' with the user parameters"
 $cmdLines = @(
     ".\Start-HttpStaticListenerBot.ps1",
     "-BotVolume `"$($BotVolume)`"",
@@ -375,10 +376,22 @@ try {
 
     while ($true) {
         try {
-            Write-Verbose "Waiting for incoming HTTP request."
+            Write-Verbose "Waiting for incoming HTTP request..."
             $context  = $listener.GetContext()
             $request  = $context.Request
             $response = $context.Response
+
+            Write-Verbose "Handle OPTIONS preflight requests for CORS"
+            if ($request.HttpMethod.ToUpper() -eq "OPTIONS") {
+                Write-Verbose "OPTIONS request detected. Sending CORS preflight response."
+                $response.StatusCode = 200
+                $response.Headers.Add("Access-Control-Allow-Origin", "*")
+                $response.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS")
+                $response.Headers.Add("Access-Control-Allow-Headers", "Content-Type")
+                $response.Close()
+
+                continue
+            }
 
             Write-Verbose "Received HTTP method '$($request.HttpMethod)'. Only GET requests are allowed"
             if ($request.HttpMethod.ToUpper() -ne "GET") {

@@ -1,61 +1,96 @@
 ﻿function Import-EnvironmentVariablesFile {
     <#
     .SYNOPSIS
-        Imports environment variables from an environment file into the current session.
+        Imports environment variables from an environment file and additional parameters into the current session.
 
     .DESCRIPTION
-        This function reads an environment file (with each line in the format KEY=value),
-        splits each line on the first "=" occurrence (allowing values to contain additional "=" characters),
-        and assigns the variables to the current session's environment.
+        This function reads an environment file (each line formatted as KEY=value) and splits each line on the first "=".
+        In addition, it accepts an array of additional environment variable strings (AdditionalEnvironmentVariables) in key=value format.
+        Both sets of key-value pairs are imported into the current session's environment.
+        Any keys specified in SkipNames are skipped.
 
     .PARAMETER EnvironmentFilePath
-        The full path to the environment file. Defaults to ".env" if not specified.
+        The full path to the environment file. Defaults to ".env" in the script's directory.
 
-    .EXAMPLE
-        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env"
-        Imports the environment variables from the specified file.
+    .PARAMETER SkipNames
+        An array of environment variable names that should not be imported from the file or the additional parameters.
 
+    .PARAMETER AdditionalEnvironmentVariables
+        An array of additional environment variable strings in key=value format.
+    
     .EXAMPLE
-        Import-EnvironmentVariablesFile
-        Imports the environment variables from a file named .env in the current directory.
+        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME" `
+            -AdditionalEnvironmentVariables @("MY_VAR=Value1", "OTHER_VAR=Value2")
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $false)]
-        [string]$EnvironmentFilePath = ".env"
+        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
+        [string[]]$SkipNames                      = @(),
+        [string[]]$AdditionalEnvironmentVariables = @()
     )
 
-    # Check if the environment file exists; if not, display a message and exit.
+    Write-Verbose "Check if the environment file exists; if not, display a message and exit"
     if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Host "The environment file was not found at path: $EnvironmentFilePath"
+        Write-Warning "The environment file was not found at path: $($EnvironmentFilePath)"
         return
     }
 
-    # Read the environment file line by line.
-    Get-Content $EnvironmentFilePath | ForEach-Object {
-        # Skip lines that are comments (starting with '#') or empty after trimming whitespace.
+    Write-Verbose "Read the environment file line by line"
+    $parametersCollection = (Get-Content $EnvironmentFilePath -Force -Encoding UTF8) + $AdditionalEnvironmentVariables
+    $parametersCollection | ForEach-Object {
+        Write-Verbose "Skip lines that are comments (starting with '#') or empty after trimming whitespace"
         if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
             return
         }
 
-        # Split the line into two parts at the first '=' occurrence.
+        Write-Verbose "Split the line into two parts at the first '=' occurrence"
         $parts = $_.Split('=', 2)
         
-        # If the line does not contain exactly two parts, skip it.
+        Write-Verbose "If the line does not contain exactly two parts, skip it"
         if ($parts.Length -ne 2) {
             return
         }
         
-        # Trim any leading or trailing whitespace from both key and value.
-        $key = $parts[0].Trim()
+        Write-Verbose "Trim any leading or trailing whitespace from the key and value"
+        $key   = $parts[0].Trim()
         $value = $parts[1].Trim()
-        
-        # Set the environment variable for the current process using Set-Item.
-        Set-Item -Path "Env:$key" -Value $value
 
-        # Write a verbose message showing the key-value pair that was set.
-        Write-Verbose "Set environment variable '$key' with value '$value'"
+        # Skip this key if it is in the skip list.
+        if ($SkipNames -contains $key) {
+            Write-Verbose "Skipping environment variable '$($key)' as it is in the skip list"
+            return
+        }
+        
+        Set-Item -Path "Env:$($key)" -Value $value
+        Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
     }
+}
+
+function Resolve-Shell {
+    <#
+    .SYNOPSIS
+        Determines the appropriate shell executable based on the operating system.
+
+    .DESCRIPTION
+        This function checks the platform of the operating system and returns the appropriate
+        shell command to use. On Unix-like systems, it returns "pwsh" (PowerShell Core), and on
+        Windows, it returns "powershell".
+
+    .OUTPUTS
+        A string representing the shell executable ("powershell" or "pwsh").
+    #>
+
+    Write-Verbose "Default shell set to 'powershell' for Windows."
+    $shell = "powershell"
+
+    # Check if the operating system is Unix-based.
+    if ([Environment]::OSVersion.Platform -eq [System.PlatformID]::Unix) {
+        Write-Verbose "Unix platform detected. Using 'pwsh' for PowerShell Core."
+        $shell = "pwsh"
+    }
+
+    Write-Verbose "Resolved shell: $shell"
+    return $shell
 }
 
 function Show-Logo {
@@ -75,8 +110,7 @@ function Show-Logo {
         # This command prints the logo, version, and the title "Main Menu" in cyan.
     #>
     param(
-        # Title text to display after the logo
-        $Title
+        [string]$Title
     )
 
     # Display each line of the ASCII art logo
@@ -99,22 +133,22 @@ function Show-Logo {
 
 function Show-Menu {
     <#
-        .SYNOPSIS
-            Displays a menu with a title and a list of options for user selection.
+    .SYNOPSIS
+        Displays a menu with a title and a list of options for user selection.
 
-        .DESCRIPTION
-            This function clears the screen, displays a title, lists options, and prompts the user for a choice.
-            Based on the user's input, it executes the corresponding action. If the user enters 0, the menu exits.
-            The function also supports displaying submenu options if indicated by the $IsSubMenu switch.
+    .DESCRIPTION
+        This function clears the screen, displays a title, lists options, and prompts the user for a choice.
+        Based on the user's input, it executes the corresponding action. If the user enters 0, the menu exits.
+        The function also supports displaying submenu options if indicated by the $IsSubMenu switch.
 
-        .PARAMETER Title
-            The title of the menu to be displayed at the top.
+    .PARAMETER Title
+        The title of the menu to be displayed at the top.
 
-        .PARAMETER Options
-            An array of strings representing the menu options that the user can choose from.
+    .PARAMETER Options
+        An array of strings representing the menu options that the user can choose from.
 
-        .EXAMPLE
-            Show-Menu -Title "Main Menu" -Options @("Option 1", "Option 2", "Option 3")
+    .EXAMPLE
+        Show-Menu -Title "Main Menu" -Options @("Option 1", "Option 2", "Option 3")
     #>
     param(
         [string]  $Title,
@@ -166,6 +200,9 @@ function Show-Menu {
                 "Update Driver" {
                     Show-UpdateDriverSubmenu
                 }
+                "Utilities" {
+                    Show-UtilitiesSubmenu
+                }
                 default {
                     # Do nothing
                 }
@@ -182,57 +219,64 @@ function Show-Menu {
 
 function Show-Wizard {
     <#
-        .SYNOPSIS
-            Displays an interactive wizard to collect parameters from the user.
+    .SYNOPSIS
+        Displays an interactive wizard to collect parameters from the user.
 
-        .DESCRIPTION
-            The function presents a title and a series of prompts defined by the
-            $WizardParameters array (each element is a hashtable with keys: Name,
-            Description, Default, Mandatory, and EnvironmentValue). It collects input for each parameter,
-            and applies a value based on the following rules:
-              - If the user provides a value, that value is used.
-              - If no value is provided:
-                  * For optional parameters: if an EnvironmentValue exists then it is used; otherwise, the Default is used.
-                  * For mandatory parameters: if an EnvironmentValue exists then it is used; otherwise, the Default is used.
-                    If no value results, the wizard continues to prompt until a non-empty value is given.
-            After collecting values, any extra parameters from $ExtraParams are merged into the collected parameters,
-            and then the specified script ($ScriptToRun) is executed using the collected parameters.
+    .DESCRIPTION
+        The function presents a title and a series of prompts defined by the
+        $WizardParameters array (each element is a hashtable with keys: Name,
+        Description, Default, Mandatory, EnvironmentValue, and Type). It collects input for each parameter,
+        applying the following rules:
+          - If the user provides a value, that value is used.
+          - If no value is provided:
+              * For optional parameters: if an EnvironmentValue exists then it is used; otherwise, the Default is used.
+              * For mandatory parameters: if an EnvironmentValue exists then it is used; otherwise, the Default is used.
+                If no value results, the wizard continues to prompt until a non-empty value is given.
+        After collecting values, any extra parameters from $ExtraParams are merged into the collected parameters,
+        and then the specified script ($ScriptToRun) is executed using the collected parameters.
+        Instead of building a dictionary of parameters, this version creates an array where each element
+        is formatted as "-Parameter Value" (with additional formatting based on type).
+        For invocation, the parameters are joined into a single string and passed as an argument
+        to the script using Start-Process.
 
-        .PARAMETER Title
-            The title displayed at the top of the wizard.
+    .PARAMETER Title
+        The title displayed at the top of the wizard.
 
-        .PARAMETER WizardParameters
-            An array of hashtables, each containing:
-                - Name: The parameter name.
-                - Description: A short description of the parameter.
-                - Default: The default value if no input is provided.
-                - Mandatory: A flag indicating if the parameter is required.
-                - EnvironmentValue: An alternative default value (e.g., from the environment) that takes precedence over the Default.
+    .PARAMETER WizardParameters
+        An array of hashtables, each containing:
+            - Name: The parameter name.
+            - Description: A short description of the parameter.
+            - Default: The default value if no input is provided.
+            - Mandatory: A flag indicating if the parameter is required.
+            - EnvironmentValue: An alternative default value (e.g., from the environment) that takes precedence over the Default.
+            - Type: The type of parameter. Supported values are "string" and "switch".
 
-        .PARAMETER ScriptToRun
-            The script to execute after collecting the parameters.
+    .PARAMETER ScriptToRun
+        The script to execute after collecting the parameters.
 
-        .PARAMETER ExtraParams
-            An optional hashtable of extra parameters to merge into the collected parameters.
+    .PARAMETER ExtraParams
+        An optional hashtable of extra parameters to merge into the collected parameters.
 
-        .EXAMPLE
-            $params = @(
-                @{
-                    Name             = "Path"
-                    Description      = "The target directory"
-                    Default          = "C:\Temp"
-                    Mandatory        = $true
-                    EnvironmentValue = $env:TARGET_DIR
-                },
-                @{
-                    Name             = "Force"
-                    Description      = "Force operation"
-                    Default          = "N"
-                    Mandatory        = $false
-                    EnvironmentValue = $null
-                }
-            )
-            Show-Wizard -Title "Example Wizard" -WizardParameters $params -ScriptToRun "./Do-Something.ps1"
+    .EXAMPLE
+        $params = @(
+            @{
+                Name             = "Path"
+                Description      = "The target directory"
+                Default          = "C:\Temp"
+                Mandatory        = $true
+                EnvironmentValue = $env:TARGET_DIR
+                Type             = "string"
+            },
+            @{
+                Name             = "Force"
+                Description      = "Force operation"
+                Default          = "N"
+                Mandatory        = $false
+                EnvironmentValue = $null
+                Type             = "switch"
+            }
+        )
+        Show-Wizard -Title "Example Wizard" -WizardParameters $params -ScriptToRun "./Do-Something.ps1"
     #>
     param(
         [string]   $Title,
@@ -241,20 +285,20 @@ function Show-Wizard {
         [hashtable]$ExtraParams = @{}
     )
 
-    # Clear the screen for a fresh wizard display
+    # Clear the screen and display the wizard title.
     Clear-Host
-
-    # Display the wizard title in cyan
     Show-Logo -Title $Title
 
-    # Initialize an empty hashtable to store user input parameters
-    $collectedParameters = @{}
+    # Determine shell type.
+    $shell = Resolve-Shell
 
-    # Loop through each wizard parameter to collect input
+    # Initialize an empty collection for the parameters.
+    $parametersCollection = @("-File $($ScriptToRun)")
+
+    # Loop through each wizard parameter to collect input.
     foreach ($wizardParameter in $WizardParameters) {
         do {
-            # Determine the effective default value:
-            # If EnvironmentValue is provided and non-empty, use it; otherwise, use the Default.
+            # Determine the effective default value.
             if (-not [string]::IsNullOrWhiteSpace($wizardParameter.EnvironmentValue)) {
                 $effectiveDefault = $wizardParameter.EnvironmentValue
             }
@@ -262,7 +306,7 @@ function Show-Wizard {
                 $effectiveDefault = $wizardParameter.Default
             }
 
-            # Build the prompt message based on whether the parameter is mandatory.
+            # Build the prompt message.
             if ($wizardParameter.Mandatory) {
                 $prompt = "$($wizardParameter.Name) (Mandatory"
                 if (-not [string]::IsNullOrWhiteSpace($effectiveDefault)) {
@@ -278,11 +322,9 @@ function Show-Wizard {
                 $prompt += ")"
             }
 
-            # Display the prompt and the parameter description.
             Write-Host "$prompt - $($wizardParameter.Description)"
             $inputValue = Read-Host "Enter value"
-            
-            # If the user provided a value, use it; otherwise, use the effective default.
+
             if (-not [string]::IsNullOrWhiteSpace($inputValue)) {
                 $content = $inputValue
             }
@@ -290,53 +332,62 @@ function Show-Wizard {
                 $content = $effectiveDefault
             }
             
-            # For mandatory parameters, if the resulting content is still empty, notify and repeat.
             if ($wizardParameter.Mandatory -and [string]::IsNullOrWhiteSpace($content)) {
                 Write-Host "This parameter is mandatory. Please provide a value." -ForegroundColor Red
                 $content = $null
             }
-            
         } while ([string]::IsNullOrWhiteSpace($content))
         
-        # Store the collected value using the parameter's name as the key.
-        $collectedParameters[$wizardParameter.Name] = $content
+        # Build the parameter string based on type.
+        switch ($wizardParameter.Type.ToLower()) {
+            "switch" {
+                # For a switch parameter, if the value is "false" (case-insensitive), ignore it.
+                if ($content -match "^(false)$") {
+                    Write-Verbose "Ignoring switch parameter '$($wizardParameter.Name)' because its value is false."
+                    continue
+                }
+                else {
+                    # For a switch, add it as a switch (without a value).
+                    $parametersCollection += "-$($wizardParameter.Name)"
+                }
+            }
+            "string" {
+                # Wrap the content in quotes.
+                $parametersCollection += "-$($wizardParameter.Name) `"$content`""
+            }
+            default {
+                # For other types, add without additional formatting.
+                $parametersCollection += "-$($wizardParameter.Name) $content"
+            }
+        }
+
         Write-Host ""
     }
 
-    # Special handling: Convert the 'Docker' parameter to a boolean.
-    # If the user input (or default) for Docker is 'Y' or 'y', set Docker to $true; otherwise, $false.
-    if ($collectedParameters.ContainsKey("Docker")) {
-        if ($collectedParameters["Docker"] -match "^(Y|y)$") {
-            $collectedParameters["Docker"] = $true
-        }
-        else {
-            $collectedParameters["Docker"] = $false
-        }
-    }
-
-    # Merge in any extra parameters from the ExtraParams hashtable into the collected parameters.
+    # Merge any extra parameters into the parameters collection.
     foreach ($key in $ExtraParams.Keys) {
-        $collectedParameters[$key] = $ExtraParams[$key]
+        $parametersCollection += "-$key $($ExtraParams[$key])"
     }
 
-    # Display the collected parameters to the user for confirmation.
-    Write-Host "Wizard complete.$([System.Environment]::NewLine)Collected parameters:" -ForegroundColor Green
-    $collectedParameters.GetEnumerator() | ForEach-Object { Write-Host "$($_.Key): $($_.Value)" }
+    # Display the collected parameters for confirmation.
+    Write-Host "Wizard complete.`nCollected parameters:" -ForegroundColor Green
+    $parametersCollection | ForEach-Object { Write-Host $_ }
     Write-Host ""
 
-    # Inform the user about the script that will be invoked next.
     Write-Host "Invoking script: $ScriptToRun" -ForegroundColor Cyan
     Write-Host ""
 
-    # Execute the provided script with the collected parameters.
+    # Join the parameters collection into a single string.
+    $argumentList = [string]::Join(' ', $parametersCollection)
+    
     try {
-        & $ScriptToRun @collectedParameters
+        # Start the process using the determined shell.
+        $process = Start-Process -FilePath $shell -ArgumentList $argumentList -PassThru
     }
     catch {
-        Write-Error "Error executing script $($ScriptToRun): $_"
+        Write-Error "Error executing script $($ScriptToRun): $($_.Exception.GetBaseException())"
     }
 
-    # Prompt the user to press any key to return to the previous menu.
     Write-Host ""
     Write-Host "Press any key to return to the previous menu..."
     Read-Host
@@ -345,17 +396,17 @@ function Show-Wizard {
 function Show-DockerImageSubmenu {
     <#
     .SYNOPSIS
-    Displays a submenu to select a Docker image build option for G4-Bot.
+        Displays a submenu to select a Docker image build option for G4-Bot.
 
     .DESCRIPTION
-    This function presents a list of available Docker image options (each defined as an ordered hashtable)
-    and prompts the user to select one. Each option includes the Dockerfile path, default Docker image tag,
-    and the bot name. When an option is selected, it builds a wizard parameter hashtable for the image tag
-    and calls the Show-Wizard function with the appropriate parameters to initiate the build process.
+        This function presents a list of available Docker image options (each defined as an ordered hashtable)
+        and prompts the user to select one. Each option includes the Dockerfile path, default Docker image tag,
+        and the bot name. When an option is selected, it builds a wizard parameter hashtable for the image tag
+        and calls the Show-Wizard function with the appropriate parameters to initiate the build process.
     The user can also choose to go back by entering "0".
 
     .OUTPUTS
-    None. The function directly displays the menu and calls another script based on user input.
+        None. The function directly displays the menu and calls another script based on user input.
     #>
 
     # Define Docker image options as an array of ordered hashtables with keys sorted alphabetically.
@@ -427,6 +478,7 @@ function Show-DockerImageSubmenu {
                     Description = "Optional image tag for the Docker image"
                     Mandatory   = $false
                     Name        = "ImageTag"
+                    Type        = "String"
                 }
             )
             
@@ -448,17 +500,17 @@ function Show-DockerImageSubmenu {
 
 function Show-LaunchEnvironmentSubmenu {
     <#
-        .SYNOPSIS
-            Displays a submenu for launching various environment services.
+    .SYNOPSIS
+        Displays a submenu for launching various environment services.
 
-        .DESCRIPTION
-            This function presents a list of available environment launch options such as starting the Grid,
-            Grid Hub, UIA Node, Browsers Node, G4 Hub, and Standalone UIA Driver Server. It prompts the user
-            to select one of the options. Based on the selection, the corresponding wizard or launch function is
-            invoked using the associated script.
+    .DESCRIPTION
+        This function presents a list of available environment launch options such as starting the Grid,
+        Grid Hub, UIA Node, Browsers Node, G4 Hub, and Standalone UIA Driver Server. It prompts the user
+        to select one of the options. Based on the selection, the corresponding wizard or launch function is
+        invoked using the associated script.
 
-        .OUTPUTS
-            None. The function interacts with the user via the console and calls external scripts/functions.
+    .OUTPUTS
+        None. The function interacts with the user via the console and calls external scripts/functions.
     #>
 
     # Define environment launch options as an array of hashtables.
@@ -541,16 +593,16 @@ function Show-LaunchEnvironmentSubmenu {
 function Show-LaunchBotSubmenu {
     <#
     .SYNOPSIS
-    Displays a submenu for launching different types of G4-Bots.
+        Displays a submenu for launching different types of G4-Bots.
 
     .DESCRIPTION
-    This function presents a list of available G4-Bot launch options and prompts the user to select one.
-    Based on the user's choice, it calls the corresponding wizard function to start the bot.
-    Options include Cron Bot, File Listener Bot, HTTP Post/Query String/Static Listener Bots, and Static Bot.
-    If a bot type is not implemented, the user is notified accordingly.
+        This function presents a list of available G4-Bot launch options and prompts the user to select one.
+        Based on the user's choice, it calls the corresponding wizard function to start the bot.
+        Options include Cron Bot, File Listener Bot, HTTP Post/Query String/Static Listener Bots, and Static Bot.
+        If a bot type is not implemented, the user is notified accordingly.
     
     .OUTPUTS
-    None. This function interacts with the user via the console and calls other functions to launch the bots.
+        None. This function interacts with the user via the console and calls other functions to launch the bots.
     #>
 
     # Define an array of launch options (each option is a hashtable with Name and Script keys)
@@ -624,19 +676,19 @@ function Show-LaunchBotSubmenu {
 
 function Show-UpdateDriverSubmenu {
     <#
-        .SYNOPSIS
-            Displays a submenu for updating drivers.
+    .SYNOPSIS
+        Displays a submenu for updating drivers.
 
-        .DESCRIPTION
-            This function presents a list of driver update options:
-              - Update Chrome Driver
-              - Update Edge Driver
-              - Update UIA Driver
-            Based on the user's selection, the corresponding update script is executed.
-            An option to go back is provided to return to the previous menu.
+    .DESCRIPTION
+        This function presents a list of driver update options:
+          - Update Chrome Driver
+          - Update Edge Driver
+          - Update UIA Driver
+        Based on the user's selection, the corresponding update script is executed.
+        An option to go back is provided to return to the previous menu.
 
-        .OUTPUTS
-            None. This function interacts with the user via the console and executes external scripts.
+    .OUTPUTS
+        None. This function interacts with the user via the console and executes external scripts.
     #>
 
     # Define update options as an array of hashtables.
@@ -646,6 +698,9 @@ function Show-UpdateDriverSubmenu {
         @{ Name = "Update Edge Driver";   Script = "./Update-EdgeDriver.ps1" },
         @{ Name = "Update UIA Driver";    Script = "./Update-UiaDriver.ps1" }
     )
+
+    # Determine shell type.
+    $shell = Resolve-Shell
 
     # Begin an infinite loop to display the submenu until the user chooses to go back.
     while ($true) {
@@ -677,10 +732,11 @@ function Show-UpdateDriverSubmenu {
 
             # Execute the corresponding update script.
             try {
-                & $selectedOption.Script
+                # Start the process using the determined shell.
+                $process = Start-Process -FilePath $shell -ArgumentList $selectedOption.Script -PassThru
             }
             catch {
-                Write-Host "Error executing script $($selectedOption.Script): $_" -ForegroundColor Red
+                Write-Host "Error executing script $($selectedOption.Script): $($_.Exception.GetBaseException().Message)" -ForegroundColor Red
                 Read-Host
             }
         }
@@ -692,25 +748,269 @@ function Show-UpdateDriverSubmenu {
     }
 }
 
+function Show-UtilitiesSubmenu {
+    <#
+    .SYNOPSIS
+        Displays a utilities submenu that offers options to convert strings to and from Base64.
+
+    .DESCRIPTION
+        This function creates an interactive submenu that presents a list of utility operations.
+        Currently, it supports converting a string to Base64 and converting a Base64 string back to text.
+        The submenu runs in an infinite loop until the user selects "Go Back".
+        For each operation that requires input, the user is prompted to enter the appropriate data.
+        The selected utility operation is then executed, and the result is displayed on the console.
+
+    .EXAMPLE
+        Show-UtilitiesSubmenu
+        # Displays the utilities submenu and allows the user to choose an operation.
+    #>
+
+    # Define a scriptblock to convert an input string to Base64.
+    $convertToBase64 = {
+        param(
+            [string]$InputString
+        )
+        # Convert the input string to a UTF-8 encoded byte array.
+        $bytes  = [System.Text.Encoding]::UTF8.GetBytes($InputString)
+
+        # Convert the byte array to a Base64 string.
+        $output = [System.Convert]::ToBase64String($bytes)
+
+        # Write the Base64 string to the host.
+        Write-Host
+        Write-Host "--- START ---"
+        Write-Host $output
+        Write-Host "--- END   ---"
+    }
+
+    # Define a scriptblock to convert a Base64 string back to a regular string.
+    $convertFromBase64 = {
+        param(
+            [string]$InputBase64String
+        )
+        # Convert the Base64 string to a byte array.
+        $bytes  = [System.Convert]::FromBase64String($InputBase64String)
+
+        # Decode the byte array using UTF-8 encoding to obtain the original string.
+        $output = [System.Text.Encoding]::UTF8.GetString($bytes)
+
+        # Write the decoded string to the host.
+        Write-Host
+        Write-Host "--- START ---"
+        Write-Host $output
+        Write-Host "--- END   ---"
+    }
+
+    # Converts a Unix timestamp (in seconds) to a UTC DateTime.
+    $convertFromUnixTimeSeconds = {
+        # Define the function parameter for the Unix timestamp.
+        param(
+            $timestamp  # Unix time in seconds since January 1, 1970
+        )
+    
+        # Output a blank line for visual separation.
+        Write-Host
+
+        # Convert the Unix timestamp to a DateTimeOffset,
+        # then extract and display the corresponding UTC DateTime.
+        Write-Host ([DateTimeOffset]::FromUnixTimeSeconds($timestamp).UtcDateTime.ToString("o"))
+    }
+
+    # Reads multi-line input from the console until a specified terminator is entered.
+    $getMultilineInput = {
+        # Define the parameter for the terminator with a default value of 'EOF'
+        param(
+            [string]$Terminator = 'EOF'
+        )
+    
+        # Inform the user how to input the text and the terminator instruction
+        Write-Host "Paste or type your text. When finished, type '$Terminator' on a new line."
+    
+        # Initialize an empty string to accumulate the multi-line input
+        $text = ""
+    
+        # Loop to continuously read input until the terminator is entered
+        while (($line = Read-Host) -ne $Terminator) {
+            # Append the entered line followed by a newline character to the accumulated text
+            $text += $line + "`n"
+        }
+
+        # Return the complete multi-line text collected from the user
+        return $text
+    }
+
+    # Define a scriptblock to generates a random alphanumeric string.
+    $newRandomString = {
+        # Set the character set.
+        $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+        # Generate a random length between 15 and 55 (Get-Random's -Maximum is exclusive, so use 56).
+        $length = Get-Random -Minimum 15 -Maximum 56
+
+        # Build the random string by selecting a random character from the set for each position.
+        $randomString = -join (1..$length | ForEach-Object {
+            # Select a random index in the character set.
+            $chars[(Get-Random -Minimum 0 -Maximum $chars.Length)]
+        })
+
+        # Output the generated random string.
+        Write-Host
+        Write-Host $randomString
+    }
+
+    # Create an array of utility options. Each option is a hashtable containing:
+    #   - Name    : The label to display.
+    #   - Script  : The scriptblock to execute.
+    #   - Title   : A prompt for input if required.
+    #   - HasInput: A flag indicating if the option requires user input.
+    $utilitiesOptions = @(
+        @{
+            Name    = "Convert String To Base64"
+            Script  = $convertToBase64
+            Title   = "Enter the text to encode into Base64:"
+            HasInput= $true
+        },
+        @{
+            Name    = "Convert String To Base64 - Multiline"
+            Script  = $convertToBase64
+            Title   = "Enter the text to encode into Base64:"
+            HasInput= $true
+        },
+        @{
+            Name    = "Convert String From Base64"
+            Script  = $convertFromBase64
+            Title   = "Enter the Base64 encoded text to decode:"
+            HasInput= $true
+        },
+        @{
+            Name    = "New Random Alphanumeric String"
+            Script  = $newRandomString
+            Title   = ""
+            HasInput= $false
+        },
+        @{
+            Name    = "Get Unix Time Seconds (UTC)"
+            Script  = { Write-Host "$([System.Environment]::NewLine)$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" }
+            Title   = ""
+            HasInput= $false
+        },
+        @{
+            Name    = "Convert From Unix Time Seconds To UTC"
+            Script  = $convertFromUnixTimeSeconds
+            Title   = "Enter the Unix timestamp (in seconds since epoch) to convert to UTC:"
+            HasInput= $true
+        }
+    )
+
+    # Determine the appropriate shell to use based on the operating system.
+    $shell = Resolve-Shell
+
+    # Begin an infinite loop to display the submenu until the user chooses to go back.
+    while ($true) {
+        # Clear the console to refresh the display.
+        Clear-Host
+
+        # Display the submenu logo and title.
+        Show-Logo -Title "Utilities"
+
+        # Loop through each utility option and display it with a numbered index.
+        for ($i = 0; $i -lt $utilitiesOptions.Length; $i++) {
+            Write-Host "$($i + 1)) $($utilitiesOptions[$i].Name)"
+        }
+
+        # Display an option for the user to go back to the previous menu.
+        Write-Host "0) Go Back"
+        Write-Host ""
+
+        # Prompt the user to enter their choice.
+        $choice = Read-Host "Enter your choice"
+
+        # Exit the submenu if the user chooses "0".
+        if ($choice -eq "0") {
+            break
+        }
+
+        # Validate that the choice is a valid integer within the range of options.
+        elseif ([int]::TryParse($choice, [ref]$null) -and $choice -ge 1 -and $choice -le $utilitiesOptions.Length) {
+            # Retrieve the selected option based on the user's choice.
+            $selectedOption = $utilitiesOptions[$choice - 1]
+
+            try {
+                # Evaluate the selected option's name with a switch statement.
+                switch ($selectedOption.Name) {
+                    "Convert String To Base64 - Multiline" {
+                        # Display the title of the selected option.
+                        Write-Host $selectedOption.Title
+
+                        # Invoke the function to get multi-line input.
+                        $content = & $getMultilineInput
+            
+                        # Execute the script associated with the selected option, passing in the content.
+                        & $selectedOption.Script $content
+
+                        break
+                    }
+                    { $_ -eq "Convert String To Base64" -or $_ -eq "Convert String From Base64" -or $_ -eq "Convert From Unix Time Seconds To UTC" } {
+                        # Display the title of the selected option.
+                        Write-Host $selectedOption.Title
+
+                        # Read a single line input from the user.
+                        $content = Read-Host
+
+                        # Execute the script associated with the selected option, passing in the content.
+                        & $selectedOption.Script $content
+
+                        break
+                    }
+                    { $_ -eq "New Random Alphanumeric String" -or $_ -eq "Get Unix Time Seconds (UTC)" } {
+                        # Execute the script associated with the selected option.
+                        & $selectedOption.Script
+
+                        break
+                    }
+                    # Default case when no matching option is found.
+                    default {
+                        Write-Host "No matching case found for '$string'"
+                    }
+                }
+
+                Write-Host
+                Write-Host "Press any key to return to the previous menu..."
+                Read-Host
+            }
+            catch {
+                # Display any error encountered during script execution.
+                Write-Host "Error executing script $($selectedOption.Script): $($_.Exception.GetBaseException().Message)" -ForegroundColor Red
+                Read-Host
+            }
+        }
+        else {
+            # Inform the user if an invalid choice was made.
+            Write-Host "Invalid choice. Please try again." -ForegroundColor Red
+            Read-Host
+        }
+    }
+}
+
 function Start-ChromeNodeWizard {
     <#
-        .SYNOPSIS
-            Launches the wizard interface for starting a Chrome Node.
+    .SYNOPSIS
+        Launches the wizard interface for starting a Chrome Node.
 
-        .DESCRIPTION
-            This function sets up a wizard to collect the necessary configuration for starting a Chrome Node.
-            It collects two parameters:
-              - GridHubUri: The drivers endpoint for the Grid. Defaults to "http://localhost:4444/wd/hub".
-              - NodePort: The port for the Chrome Node. Defaults to 5552.
-            Both parameters are not mandatory; if no input is provided, their respective default values are used.
-            Once the parameters are collected, the specified script is executed with the provided configuration.
+    .DESCRIPTION
+        This function sets up a wizard to collect the necessary configuration for starting a Chrome Node.
+        It collects two parameters:
+          - GridHubUri: The drivers endpoint for the Grid. Defaults to "http://localhost:4444/wd/hub".
+          - NodePort: The port for the Chrome Node. Defaults to 5552.
+        Both parameters are not mandatory; if no input is provided, their respective default values are used.
+        Once the parameters are collected, the specified script is executed with the provided configuration.
 
-        .PARAMETER Script
-            The path to the script that will be executed after collecting the Chrome Node configuration.
+    .PARAMETER Script
+        The path to the script that will be executed after collecting the Chrome Node configuration.
 
-        .EXAMPLE
-            Start-ChromeNodeWizard -Script "./Start-ChromeNode.ps1"
-            # Launches the wizard to collect parameters and then runs the Start-ChromeNode.ps1 script.
+    .EXAMPLE
+        Start-ChromeNodeWizard -Script "./Start-ChromeNode.ps1"
+        # Launches the wizard to collect parameters and then runs the Start-ChromeNode.ps1 script.
     #>
     param(
         [string]$Script
@@ -724,13 +1024,15 @@ function Start-ChromeNodeWizard {
             EnvironmentValue = $env:DRIVER_BINARIES
             Mandatory        = $true
             Name             = "GridHubUri"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "5552"
+            Default          = 5552
             Description      = "Enter the port for the Chrome Node."
             EnvironmentValue = $env:CHROME_NODE_PORT
             Mandatory        = $true
             Name             = "NodePort"
+            Type             = "Number"
         }
     )
 
@@ -745,19 +1047,19 @@ function Start-ChromeNodeWizard {
 function Start-CronBotWizard {
     <#
     .SYNOPSIS
-    Launches the wizard interface for configuring and starting a Cron Bot.
+        Launches the wizard interface for configuring and starting a Cron Bot.
 
     .DESCRIPTION
-    This function builds a set of ordered wizard parameters required to configure the Cron Bot.
-    It then calls the Show-Wizard function to display a wizard interface to the user.
-    The wizard collects values for each parameter, which are then used by the provided script
-    to launch the Cron Bot.
+        This function builds a set of ordered wizard parameters required to configure the Cron Bot.
+        It then calls the Show-Wizard function to display a wizard interface to the user.
+        The wizard collects values for each parameter, which are then used by the provided script
+        to launch the Cron Bot.
 
     .PARAMETER Script
-    The path to the script that will be executed after the wizard configuration is complete.
+        The path to the script that will be executed after the wizard configuration is complete.
 
     .OUTPUTS
-    None. The function calls Show-Wizard which handles user input and execution.
+        None. The function calls Show-Wizard which handles user input and execution.
     #>
     param(
         $Script
@@ -772,6 +1074,7 @@ function Start-CronBotWizard {
             EnvironmentValue = $env:BOT_VOLUME
             Mandatory        = $true
             Name             = "BotVolume"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "g4-cron-bot"
@@ -779,6 +1082,7 @@ function Start-CronBotWizard {
             EnvironmentValue = $env:CRON_BOT_NAME
             Mandatory        = $true
             Name             = "BotName"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "* * * * *"
@@ -786,6 +1090,7 @@ function Start-CronBotWizard {
             EnvironmentValue = $env:CRON_BOT_SCHEDULES
             Mandatory        = $true
             Name             = "CronSchedules"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "http://localhost:4444/wd/hub"
@@ -793,6 +1098,7 @@ function Start-CronBotWizard {
             EnvironmentValue = $env:DRIVER_BINARIES
             Mandatory        = $true
             Name             = "DriverBinaries"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "http://localhost:9944"
@@ -800,6 +1106,7 @@ function Start-CronBotWizard {
             EnvironmentValue = $env:G4_HUB_URI
             Mandatory        = $true
             Name             = "HubUri"
+            Type             = "String"
         },
         [ordered]@{
             Default          = ""
@@ -807,13 +1114,15 @@ function Start-CronBotWizard {
             EnvironmentValue = $env:G4_LICENSE_TOKEN
             Mandatory        = $true
             Name             = "Token"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "false"
+            Default          = $false
             Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
             EnvironmentValue = ""
             Mandatory        = $false
             Name             = "Docker"
+            Type             = "Switch"
         }
     )
 
@@ -827,19 +1136,19 @@ function Start-CronBotWizard {
 function Start-FileListenerBotWizard {
     <#
     .SYNOPSIS
-    Launches the wizard interface for configuring and starting a File Listener Bot.
+        Launches the wizard interface for configuring and starting a File Listener Bot.
 
     .DESCRIPTION
-    This function sets up the required wizard parameters for the File Listener Bot. It defines a set of
-    ordered parameters such as the bot's volume, name, driver binaries location, hub URI, polling interval,
-    authentication token, and whether to use Docker. It then invokes the Show-Wizard function, which displays
-    a user interface to collect values for these parameters and executes the provided script to launch the bot.
+        This function sets up the required wizard parameters for the File Listener Bot. It defines a set of
+        ordered parameters such as the bot's volume, name, driver binaries location, hub URI, polling interval,
+        authentication token, and whether to use Docker. It then invokes the Show-Wizard function, which displays
+        a user interface to collect values for these parameters and executes the provided script to launch the bot.
 
     .PARAMETER Script
-    The path to the script that will be executed after the wizard configuration is complete.
+        The path to the script that will be executed after the wizard configuration is complete.
 
     .OUTPUTS
-    None. The function displays a wizard to the user and passes the collected parameters to the specified script.
+        None. The function displays a wizard to the user and passes the collected parameters to the specified script.
     #>
     param(
         $Script
@@ -854,6 +1163,7 @@ function Start-FileListenerBotWizard {
             EnvironmentValue = $env:BOT_VOLUME
             Mandatory        = $true
             Name             = "BotVolume"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "g4-file-listener-bot"
@@ -861,6 +1171,7 @@ function Start-FileListenerBotWizard {
             EnvironmentValue = $env:FILE_LISTENER_BOT_NAME
             Mandatory        = $true
             Name             = "BotName"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "http://localhost:4444/wd/hub"
@@ -868,6 +1179,7 @@ function Start-FileListenerBotWizard {
             EnvironmentValue = $env:DRIVER_BINARIES
             Mandatory        = $true
             Name             = "DriverBinaries"
+            Type             = "String"
         },
         [ordered]@{
             Default          = ""
@@ -875,13 +1187,15 @@ function Start-FileListenerBotWizard {
             EnvironmentValue = $env:G4_HUB_URI
             Mandatory        = $true
             Name             = "HubUri"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "10"
+            Default          = 10
             Description      = "The polling interval (in seconds) between each file check."
             EnvironmentValue = $env:FILE_LISTENER_BOT_INTERVAL_TIME
             Mandatory        = $true
             Name             = "IntervalTime"
+            Type             = "Number"
         },
         [ordered]@{
             Default          = ""
@@ -889,13 +1203,15 @@ function Start-FileListenerBotWizard {
             EnvironmentValue = $env:G4_LICENSE_TOKEN
             Mandatory        = $true
             Name             = "Token"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "false"
+            Default          = $false
             Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
             EnvironmentValue = ""
             Mandatory        = $false
             Name             = "Docker"
+            Type             = "Switch"
         }
     )
 
@@ -908,20 +1224,20 @@ function Start-FileListenerBotWizard {
 
 function Start-G4HubWizard {
     <#
-        .SYNOPSIS
-            Launches the wizard interface for starting the G4 Hub.
+    .SYNOPSIS
+        Launches the wizard interface for starting the G4 Hub.
 
-        .DESCRIPTION
-            This function is used to launch the G4 Hub. Unlike other wizards,
-            it does not collect any parameters from the user. It simply invokes
-            the specified script to start the G4 Hub.
+    .DESCRIPTION
+        This function is used to launch the G4 Hub. Unlike other wizards,
+        it does not collect any parameters from the user. It simply invokes
+        the specified script to start the G4 Hub.
 
-        .PARAMETER Script
-            The path to the script that will be executed to launch the G4 Hub.
+    .PARAMETER Script
+        The path to the script that will be executed to launch the G4 Hub.
 
-        .EXAMPLE
-            Start-G4HubWizard -Script "./Start-G4Hub.ps1"
-            # Launches the G4 Hub by executing the specified script.
+    .EXAMPLE
+        Start-G4HubWizard -Script "./Start-G4Hub.ps1"
+        # Launches the G4 Hub by executing the specified script.
     #>
     param(
         [string]$Script
@@ -930,12 +1246,15 @@ function Start-G4HubWizard {
     # Inform the user that the G4 Hub is being launched.
     Write-Host "Launching G4 Hub..." -ForegroundColor Cyan
 
+    # Determine shell type.
+    $shell = Resolve-Shell
+
     # Try to execute the provided script.
     try {
-        & $Script
+        $process = Start-Process -FilePath $shell -ArgumentList $Script -PassThru
     }
     catch {
-        Write-Error "Error launching G4 Hub: $_"
+        Write-Error "Error launching G4 Hub: $($_.Exception.GetBaseException())"
     }
 
     # Prompt the user to press any key to return to the previous menu.
@@ -946,21 +1265,21 @@ function Start-G4HubWizard {
 
 function Start-GridHubWizard {
     <#
-        .SYNOPSIS
-            Launches the wizard interface for starting the Grid Hub.
+    .SYNOPSIS
+        Launches the wizard interface for starting the Grid Hub.
 
-        .DESCRIPTION
-            This function sets up a wizard to collect the necessary configuration for starting the Grid Hub.
-            It collects the SessionRequestTimeout parameter, which represents the timeout for session requests.
-            The parameter is not mandatory; if no input is provided, it defaults to 42300.
-            Once the parameter is collected, the specified script is executed with the provided configuration.
+    .DESCRIPTION
+        This function sets up a wizard to collect the necessary configuration for starting the Grid Hub.
+        It collects the SessionRequestTimeout parameter, which represents the timeout for session requests.
+        The parameter is not mandatory; if no input is provided, it defaults to 42300.
+        Once the parameter is collected, the specified script is executed with the provided configuration.
 
-        .PARAMETER Script
-            The path to the script that will be executed after collecting the Grid Hub configuration.
+    .PARAMETER Script
+        The path to the script that will be executed after collecting the Grid Hub configuration.
 
-        .EXAMPLE
-            Start-GridHubWizard -Script "./Start-GridHub.ps1"
-            # Launches the wizard to collect the SessionRequestTimeout and then runs the Start-GridHub.ps1 script.
+    .EXAMPLE
+        Start-GridHubWizard -Script "./Start-GridHub.ps1"
+        # Launches the wizard to collect the SessionRequestTimeout and then runs the Start-GridHub.ps1 script.
     #>
     param(
         [string]$Script
@@ -975,6 +1294,7 @@ function Start-GridHubWizard {
             EnvironmentValue = $env:SESSION_REQUEST_TIMEOUT
             Mandatory        = $false
             Name             = "SessionRequestTimeout"
+            Type             = "Number"
         }
     )
 
@@ -988,23 +1308,23 @@ function Start-GridHubWizard {
 
 function Start-EdgeNodeWizard {
     <#
-        .SYNOPSIS
-            Launches the wizard interface for starting an Edge Node.
+    .SYNOPSIS
+        Launches the wizard interface for starting an Edge Node.
 
-        .DESCRIPTION
-            This function sets up a wizard to collect the necessary configuration for starting an Edge Node.
-            It collects two parameters:
-              - GridHubUri: The drivers endpoint for the Grid. Defaults to "http://localhost:4444/wd/hub".
-              - NodePort: The port for the Edge Node. Defaults to 5553.
-            Both parameters are not mandatory; if no input is provided, their respective default values are used.
-            Once the parameters are collected, the specified script is executed with the provided configuration.
+    .DESCRIPTION
+        This function sets up a wizard to collect the necessary configuration for starting an Edge Node.
+        It collects two parameters:
+          - GridHubUri: The drivers endpoint for the Grid. Defaults to "http://localhost:4444/wd/hub".
+          - NodePort: The port for the Edge Node. Defaults to 5553.
+        Both parameters are not mandatory; if no input is provided, their respective default values are used.
+        Once the parameters are collected, the specified script is executed with the provided configuration.
 
-        .PARAMETER Script
-            The path to the script that will be executed after collecting the Edge Node configuration.
+    .PARAMETER Script
+        The path to the script that will be executed after collecting the Edge Node configuration.
 
-        .EXAMPLE
-            Start-EdgeNodeWizard -Script "./Start-EdgeNode.ps1"
-            # Launches the wizard to collect parameters and then runs the Start-EdgeNode.ps1 script.
+    .EXAMPLE
+        Start-EdgeNodeWizard -Script "./Start-EdgeNode.ps1"
+        # Launches the wizard to collect parameters and then runs the Start-EdgeNode.ps1 script.
     #>
     param(
         [string]$Script
@@ -1018,13 +1338,15 @@ function Start-EdgeNodeWizard {
             EnvironmentValue = $env:DRIVER_BINARIES
             Mandatory        = $true
             Name             = "GridHubUri"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "5553"
+            Default          = 5553
             Description      = "Enter the port for the Edge Node."
             EnvironmentValue = $env:EDGE_NODE_PORT
             Mandatory        = $true
             Name             = "NodePort"
+            Type             = "Number"
         }
     )
 
@@ -1038,21 +1360,21 @@ function Start-EdgeNodeWizard {
 
 function Start-GridWizard {
     <#
-        .SYNOPSIS
-            Launches the wizard interface for starting the Grid.
+    .SYNOPSIS
+        Launches the wizard interface for starting the Grid.
 
-        .DESCRIPTION
-            This function sets up a wizard to collect the necessary configuration for starting the Grid.
-            It collects the GridHubUri parameter, which represents the drivers endpoint for the Grid.
-            The parameter is not mandatory; if no input is provided, it defaults to "http://localhost:4444/wd/hub".
-            Once the parameter is collected, the specified script is executed with the provided configuration.
+    .DESCRIPTION
+        This function sets up a wizard to collect the necessary configuration for starting the Grid.
+        It collects the GridHubUri parameter, which represents the drivers endpoint for the Grid.
+        The parameter is not mandatory; if no input is provided, it defaults to "http://localhost:4444/wd/hub".
+        Once the parameter is collected, the specified script is executed with the provided configuration.
 
-        .PARAMETER Script
-            The path to the script that will be executed after collecting the Grid configuration.
+    .PARAMETER Script
+        The path to the script that will be executed after collecting the Grid configuration.
 
-        .EXAMPLE
-            Start-GridWizard -Script "./Start-Grid.ps1"
-            # Launches the wizard to collect the GridHubUri and then runs the Start-Grid.ps1 script.
+    .EXAMPLE
+        Start-GridWizard -Script "./Start-Grid.ps1"
+        # Launches the wizard to collect the GridHubUri and then runs the Start-Grid.ps1 script.
     #>
     param(
         [string]$Script
@@ -1067,6 +1389,7 @@ function Start-GridWizard {
             EnvironmentValue = $env:DRIVER_BINARIES
             Mandatory        = $true
             Name             = "GridHubUri"
+            Type             = "String"
         }
     )
 
@@ -1081,20 +1404,20 @@ function Start-GridWizard {
 function Start-HttpListenerBotWizard {
     <#
     .SYNOPSIS
-    Launches the wizard interface for configuring and starting an HTTP Listener Bot.
+        Launches the wizard interface for configuring and starting an HTTP Listener Bot.
 
     .DESCRIPTION
-    This function sets up the required wizard parameters for the HTTP Listener Bot. It creates a list of
-    ordered parameters including the bot's volume, name, HTTP port, content type, driver binaries location,
-    hub URI, default response content, authentication token, and Docker usage option. The function then
-    calls the Show-Wizard function to display a user-friendly interface for collecting these parameters,
-    after which the provided script is executed with the collected configuration.
+        This function sets up the required wizard parameters for the HTTP Listener Bot. It creates a list of
+        ordered parameters including the bot's volume, name, HTTP port, content type, driver binaries location,
+        hub URI, default response content, authentication token, and Docker usage option. The function then
+        calls the Show-Wizard function to display a user-friendly interface for collecting these parameters,
+        after which the provided script is executed with the collected configuration.
 
     .PARAMETER Script
-    The path to the script that will be executed after the wizard configuration is complete.
+        The path to the script that will be executed after the wizard configuration is complete.
 
     .OUTPUTS
-    None. The function invokes Show-Wizard which handles user input and subsequent execution.
+        None. The function invokes Show-Wizard which handles user input and subsequent execution.
     #>
     param(
         $Title,
@@ -1110,6 +1433,7 @@ function Start-HttpListenerBotWizard {
             EnvironmentValue = $env:BOT_VOLUME
             Mandatory        = $true
             Name             = "BotVolume"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "g4-http-listener-bot"
@@ -1117,13 +1441,15 @@ function Start-HttpListenerBotWizard {
             EnvironmentValue = $env:HTTP_LISTENER_BOT_NAME
             Mandatory        = $true
             Name             = "BotName"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "8080"
+            Default          = 8080
             Description      = "The port on which the HTTP POST listener will run."
             EnvironmentValue = $env:HOST_PORT
             Mandatory        = $false
             Name             = "HostPort"
+            Type             = "Number"
         },
         [ordered]@{
             Default          = "application/json; charset=utf-8"
@@ -1131,6 +1457,7 @@ function Start-HttpListenerBotWizard {
             EnvironmentValue = $env:CONTENT_TYPE
             Mandatory        = $false
             Name             = "ContentType"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "http://localhost:4444/wd/hub"
@@ -1138,6 +1465,7 @@ function Start-HttpListenerBotWizard {
             EnvironmentValue = $env:DRIVER_BINARIES
             Mandatory        = $true
             Name             = "DriverBinaries"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "http://localhost:9944"
@@ -1145,6 +1473,7 @@ function Start-HttpListenerBotWizard {
             EnvironmentValue = $env:G4_HUB_URI
             Mandatory        = $true
             Name             = "HubUri"
+            Type             = "String"
         },
         [ordered]@{
             Default          = 'eyJtZXNzYWdlIjogInN1Y2Nlc3MifQ=='
@@ -1152,6 +1481,7 @@ function Start-HttpListenerBotWizard {
             EnvironmentValue = $env:BASE64_RESPONSE_CONTENT
             Mandatory        = $false
             Name             = "Base64ResponseContent"
+            Type             = "String"
         },
         [ordered]@{
             Default          = ""
@@ -1159,13 +1489,15 @@ function Start-HttpListenerBotWizard {
             EnvironmentValue = $env:G4_LICENSE_TOKEN
             Mandatory        = $true
             Name             = "Token"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "false"
+            Default          = $false
             Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
             EnvironmentValue = $null
             Mandatory        = $false
             Name             = "Docker"
+            Type             = "Switch"
         }
     )
 
@@ -1178,18 +1510,18 @@ function Start-HttpListenerBotWizard {
 
 function Start-NewPartitionWizard {
     <#
-        .SYNOPSIS
-            Initializes a new G4-Bot partition wizard.
-        
-        .DESCRIPTION
-            This function sets up the environment for creating a new G4-Bot partition.
-            It determines the appropriate bot volume based on the operating system,
-            prepares wizard parameters, and then calls the Show-Wizard function to
-            run the partition initialization script.
+    .SYNOPSIS
+        Initializes a new G4-Bot partition wizard.
+    
+    .DESCRIPTION
+        This function sets up the environment for creating a new G4-Bot partition.
+        It determines the appropriate bot volume based on the operating system,
+        prepares wizard parameters, and then calls the Show-Wizard function to
+        run the partition initialization script.
 
-        .NOTES
-            The function adapts the bot volume path for non-Windows systems.
-            It also generates a unique bot partition name using the Unix epoch time.
+    .NOTES
+        The function adapts the bot volume path for non-Windows systems.
+        It also generates a unique bot partition name using the Unix epoch time.
     #>
 
     # Set the default bot volume path for Windows systems
@@ -1210,6 +1542,7 @@ function Start-NewPartitionWizard {
             EnvironmentValue = $env:BOT_VOLUME
             Mandatory        = $true
             Name             = "BotVolume"
+            Type             = "String"
         },
         @{
             # Generate a unique bot partition name using Unix epoch time for uniqueness
@@ -1218,6 +1551,7 @@ function Start-NewPartitionWizard {
             EnvironmentValue = $null
             Mandatory        = $true
             Name             = "BotName"
+            Type             = "String"
         }
     )
 
@@ -1232,20 +1566,20 @@ function Start-NewPartitionWizard {
 function Start-StaticBotWizard {
     <#
     .SYNOPSIS
-    Launches the wizard interface for configuring and starting a Static Bot.
+        Launches the wizard interface for configuring and starting a Static Bot.
 
     .DESCRIPTION
-    This function sets up the required wizard parameters for the Static Bot.
-    It defines a set of ordered parameters including the bot's operating volume, name,
-    driver binaries location, hub URI, polling interval, authentication token, and Docker usage.
-    After setting up these parameters, it calls the Show-Wizard function to present a user-friendly
-    interface for collecting configuration values and then executes the provided script using these values.
+        This function sets up the required wizard parameters for the Static Bot.
+        It defines a set of ordered parameters including the bot's operating volume, name,
+        driver binaries location, hub URI, polling interval, authentication token, and Docker usage.
+        After setting up these parameters, it calls the Show-Wizard function to present a user-friendly
+        interface for collecting configuration values and then executes the provided script using these values.
 
     .PARAMETER Script
-    The path to the script that will be executed after the wizard configuration is complete.
+        The path to the script that will be executed after the wizard configuration is complete.
 
     .OUTPUTS
-    None. The function calls Show-Wizard which handles user input and the subsequent bot launch.
+        None. The function calls Show-Wizard which handles user input and the subsequent bot launch.
     #>
     param(
         $Script
@@ -1261,6 +1595,7 @@ function Start-StaticBotWizard {
             EnvironmentValue = $env:BOT_VOLUME
             Mandatory        = $true
             Name             = "BotVolume"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "g4-static-bot"
@@ -1268,6 +1603,7 @@ function Start-StaticBotWizard {
             EnvironmentValue = $env:STATIC_BOT_NAME
             Mandatory        = $true
             Name             = "BotName"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "http://localhost:4444/wd/hub"
@@ -1275,6 +1611,7 @@ function Start-StaticBotWizard {
             EnvironmentValue = $env:DRIVER_BINARIES
             Mandatory        = $true
             Name             = "DriverBinaries"
+            Type             = "String"
         },
         [ordered]@{
             Default          = "http://localhost:9944"
@@ -1282,13 +1619,15 @@ function Start-StaticBotWizard {
             EnvironmentValue = $env:G4_HUB_URI
             Mandatory        = $true
             Name             = "HubUri"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "60"
+            Default          = 60
             Description      = "The interval (in seconds) between each bot call."
             EnvironmentValue = $env:STATIC_BOT_INTERVAL_TIME
             Mandatory        = $true
             Name             = "IntervalTime"
+            Type             = "Number"
         },
         [ordered]@{
             Default          = ""
@@ -1296,13 +1635,15 @@ function Start-StaticBotWizard {
             EnvironmentValue = $env:G4_LICENSE_TOKEN
             Mandatory        = $true
             Name             = "Token"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "false"
+            Default          = $false
             Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
             EnvironmentValue = ""
             Mandatory        = $false
             Name             = "Docker"
+            Type             = "Switch"
         }
     )
 
@@ -1315,23 +1656,23 @@ function Start-StaticBotWizard {
 
 function Start-UiaNodeWizard {
     <#
-        .SYNOPSIS
-            Launches the wizard interface for starting a UIA Node.
+    .SYNOPSIS
+        Launches the wizard interface for starting a UIA Node.
 
-        .DESCRIPTION
-            This function sets up a wizard to collect the necessary configuration for starting a UIA Node.
-            It collects two parameters:
-              - GridHubUri: The drivers endpoint for the Grid. Defaults to "http://localhost:4444/wd/hub".
-              - NodePort: The port for the UIA Node. Defaults to 5554.
-            Both parameters are not mandatory. If no input is provided, their respective default values are used.
-            Once the parameters are collected, the specified script is executed with the provided configuration.
+    .DESCRIPTION
+        This function sets up a wizard to collect the necessary configuration for starting a UIA Node.
+        It collects two parameters:
+          - GridHubUri: The drivers endpoint for the Grid. Defaults to "http://localhost:4444/wd/hub".
+          - NodePort: The port for the UIA Node. Defaults to 5554.
+        Both parameters are not mandatory. If no input is provided, their respective default values are used.
+        Once the parameters are collected, the specified script is executed with the provided configuration.
 
-        .PARAMETER Script
-            The path to the script that will be executed after collecting the UIA Node configuration.
+    .PARAMETER Script
+        The path to the script that will be executed after collecting the UIA Node configuration.
 
-        .EXAMPLE
-            Start-UiaNodeWizard -Script "./Start-UiaNode.ps1"
-            # Launches the wizard to collect parameters and then runs the Start-UiaNode.ps1 script.
+    .EXAMPLE
+        Start-UiaNodeWizard -Script "./Start-UiaNode.ps1"
+        # Launches the wizard to collect parameters and then runs the Start-UiaNode.ps1 script.
     #>
     param(
         [string]$Script
@@ -1345,13 +1686,15 @@ function Start-UiaNodeWizard {
             EnvironmentValue = $env:DRIVER_BINARIES
             Mandatory        = $false
             Name             = "GridHubUri"
+            Type             = "String"
         },
         [ordered]@{
-            Default          = "5554"
+            Default          = 5554
             Description      = "Enter the port for the UIA Node."
             EnvironmentValue = $env:UIA_NODE_PORT
             Mandatory        = $false
             Name             = "NodePort"
+            Type             = "Number"
         }
     )
 
@@ -1365,22 +1708,22 @@ function Start-UiaNodeWizard {
 
 function Start-StandaloneUiaDriverServerWizard {
     <#
-        .SYNOPSIS
-            Launches the wizard interface for starting the Standalone UIA Driver Server.
+    .SYNOPSIS
+        Launches the wizard interface for starting the Standalone UIA Driver Server.
 
-        .DESCRIPTION
-            This function sets up a wizard to collect the necessary configuration for starting the Standalone UIA Driver Server.
-            It collects one parameter:
-              - ServicePort: The port on which the UIA Driver Server will run. Defaults to 5555.
-            The parameter is not mandatory; if no input is provided, the default value is used.
-            Once the parameter is collected, the specified script is executed with the provided configuration.
+    .DESCRIPTION
+        This function sets up a wizard to collect the necessary configuration for starting the Standalone UIA Driver Server.
+        It collects one parameter:
+          - ServicePort: The port on which the UIA Driver Server will run. Defaults to 5555.
+        The parameter is not mandatory; if no input is provided, the default value is used.
+        Once the parameter is collected, the specified script is executed with the provided configuration.
 
-        .PARAMETER Script
-            The path to the script that will be executed after collecting the configuration.
+    .PARAMETER Script
+        The path to the script that will be executed after collecting the configuration.
 
-        .EXAMPLE
-            Start-StandaloneUiaDriverServerWizard -Script "./Start-StandaloneUiaDriverServer.ps1"
-            # Launches the wizard to collect the ServicePort and then runs the Start-StandaloneUiaDriverServer.ps1 script.
+    .EXAMPLE
+        Start-StandaloneUiaDriverServerWizard -Script "./Start-StandaloneUiaDriverServer.ps1"
+        # Launches the wizard to collect the ServicePort and then runs the Start-StandaloneUiaDriverServer.ps1 script.
     #>
     param(
         [string]$Script
@@ -1389,11 +1732,12 @@ function Start-StandaloneUiaDriverServerWizard {
     # Define wizard parameters for starting the Standalone UIA Driver Server.
     $wizardParameters = @(
         [ordered]@{
-            Default          = "5555"
+            Default          = 5555
             Description      = "Enter the port for the Standalone UIA Driver Server."
             EnvironmentValue = $env:UIA_DRIVER_PORT
             Mandatory        = $false
             Name             = "ServicePort"
+            Type             = "Number"
         }
     )
 
@@ -1408,19 +1752,19 @@ function Start-StandaloneUiaDriverServerWizard {
 function Start-Main {
     <#
     .SYNOPSIS
-    Displays the main menu and controls the overall program flow.
+        Displays the main menu and controls the overall program flow.
 
     .DESCRIPTION
-    This function enters an infinite loop to display the main menu options and wait for user input.
-    The main menu provides three options:
-      1. Initialize a New G4-Bot Partition
-      2. Build G4-Bot Docker Image
-      3. Launch a New G4-Bot
-    After displaying the menu, the function prompts the user to either exit by pressing 'Q' or return to the
-    main menu by pressing any other key.
+        This function enters an infinite loop to display the main menu options and wait for user input.
+        The main menu provides three options:
+          1. Initialize a New G4-Bot Partition
+          2. Build G4-Bot Docker Image
+          3. Launch a New G4-Bot
+        After displaying the menu, the function prompts the user to either exit by pressing 'Q' or return to the
+        main menu by pressing any other key.
 
     .OUTPUTS
-    None. The function handles user interaction and controls the program flow.
+        None. The function handles user interaction and controls the program flow.
     #>
     
     # Begin an infinite loop to continuously display the main menu until the user chooses to exit.
@@ -1431,7 +1775,8 @@ function Start-Main {
             "Launch a New G4-Bot",
             "Launch Environment",
             "Build G4-Bot Docker Image",
-            "Update Driver"
+            "Update Driver",
+            "Utilities"
         )
 
         # Display the main menu using a helper function (assumed to be defined elsewhere).

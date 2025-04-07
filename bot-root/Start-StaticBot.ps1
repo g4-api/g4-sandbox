@@ -103,7 +103,7 @@ function Import-EnvironmentVariablesFile {
 
     Write-Verbose "Check if the environment file exists; if not, display a message and exit"
     if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
+        Write-Warning "The environment file was not found at path: $($EnvironmentFilePath)"
         return
     }
 
@@ -129,23 +129,16 @@ function Import-EnvironmentVariablesFile {
 
         # Skip this key if it is in the skip list.
         if ($SkipNames -contains $key) {
-            Write-Verbose "Skipping environment variable '$key' as it is in the skip list."
+            Write-Verbose "Skipping environment variable '$($key)' as it is in the skip list"
             return
         }
         
-        Write-Verbose "Set the environment variable for the current process using Set-Item"
         Set-Item -Path "Env:$($key)" -Value $value
-        Write-Host "Set environment variable '$key' with value '$value'"
+        Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
     }
 }
 
 function Wait-Interval {
-    [CmdletBinding()]
-    param(
-        [int]   $IntervalTime,
-        [string]$Message
-    )
-
     <#
     .SYNOPSIS
         Pauses script execution for a specified interval after displaying the next scheduled invocation time.
@@ -164,6 +157,11 @@ function Wait-Interval {
     .EXAMPLE
         Wait-Interval -Message "Next automation run scheduled at:" -IntervalTime 120
     #>
+    [CmdletBinding()]
+    param(
+        [int]   $IntervalTime,
+        [string]$Message
+    )
 
     # Calculate the next scheduled time by adding the specified interval to the current date and time.
     $nextAutomationTime = (Get-Date).AddSeconds($IntervalTime)
@@ -180,14 +178,25 @@ function Wait-Interval {
 
 if ($Docker) {
     try {
-        docker run -d -v "$($BotVolume):/bots" `
-            -e BOT_NAME="$($BotName)" `
-            -e DRIVER_BINARIES="$($DriverBinaries)" `
-            -e HUB_URI="$($HubUri)" `
-            -e INTERVAL_TIME="$($IntervalTime)" `
-            -e TOKEN="$($Token)" `
-            --name "$($BotName)-$([guid]::NewGuid())" g4-static-bot:latest
+        Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$($BotName)'."
+        Write-Verbose "Building the Docker command from the specified parameters."
+        $cmdLines = @(
+            "run -d -v `"$($BotVolume):/bots`"",
+            " -e BOT_NAME=`"$($BotName)`"",
+            " -e DRIVER_BINARIES=`"$($DriverBinaries)`"",
+            " -e HUB_URI=`"$($HubUri)`"",
+            " -e INTERVAL_TIME=`"$($IntervalTime)`"",
+            " -e TOKEN=`"$($Token)`"",
+            " --name `"$($BotName)-$([guid]::NewGuid())`" g4-static-bot:latest"
+        )
         
+        Write-Verbose "Joining command parts into a single Docker command string."
+        $dockerCmd = $cmdLines -join [string]::Empty
+
+        Write-Host "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
+        $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
+        $process.WaitForExit(60000)
+
         Write-Host "Docker container '$($BotName)' started successfully."
         Exit 0
     }
@@ -199,11 +208,23 @@ if ($Docker) {
 
 try {
     Write-Verbose "Setting Environment Parameters"
-    Import-EnvironmentVariablesFile -Verbose
+    Import-EnvironmentVariablesFile
 }
 catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
+
+Write-Verbose "Constructing the command line for 'Start-StaticBot.ps1' with the user parameters"
+$cmdLines = @(
+    ".\Start-StaticBot.ps1",
+    "-BotVolume `"$($BotVolume)`"",
+    "-BotName `"$($BotName)`"",
+    "-DriverBinaries `"$($DriverBinaries)`"",
+    "-HubUri `"$($HubUri)`"",
+    "-IntervalTime $($IntervalTime)",
+    "-Token `"$($Token)`""
+) -join " "
+Write-Host "Invoking Process with the following command:$([System.Environment]::NewLine)$($cmdLines)"
 
 # Construct the full request URL by trimming any trailing slash from $HubUri and appending the endpoint path.
 $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
@@ -259,7 +280,7 @@ while ($true) {
 
         # Send the Base64-encoded JSON to the remote endpoint using a POST request.
         Write-Host
-        Write-Host "Sending Base64-encoded 'automation.json' to remote endpoint..."
+        Write-Host "Sending Base64-encoded 'automation.json' to remote endpoint"
         $response = Invoke-RestMethod -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
     }
     catch {
@@ -281,6 +302,5 @@ while ($true) {
     }
 
     # Wait for the specified interval before starting the next iteration.
-    Write-Host
     Wait-Interval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
 }

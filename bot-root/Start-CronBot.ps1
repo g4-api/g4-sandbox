@@ -89,7 +89,7 @@ function Import-EnvironmentVariablesFile {
 
     Write-Verbose "Check if the environment file exists; if not, display a message and exit"
     if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
+        Write-Warning "The environment file was not found at path: $($EnvironmentFilePath)"
         return
     }
 
@@ -115,33 +115,41 @@ function Import-EnvironmentVariablesFile {
 
         # Skip this key if it is in the skip list.
         if ($SkipNames -contains $key) {
-            Write-Verbose "Skipping environment variable '$key' as it is in the skip list."
+            Write-Verbose "Skipping environment variable '$($key)' as it is in the skip list"
             return
         }
         
-        Write-Verbose "Set the environment variable for the current process using Set-Item"
         Set-Item -Path "Env:$($key)" -Value $value
-        Write-Host "Set environment variable '$key' with value '$value'"
+        Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
     }
 }
 
 # If the Docker switch is provided, attempt to start the Docker container and exit.
 if ($Docker) {
     try {
-        Write-Host "Docker mode enabled. Attempting to launch Docker container..."
-        docker run -d -v "$($BotVolume):/bots" `
-            -e BOT_NAME="$($BotName)" `
-            -e CRON_SCHEDULES="$($CronSchedules)" `
-            -e DRIVER_BINARIES="$($DriverBinaries)" `
-            -e HUB_URI="$($HubUri)" `
-            -e TOKEN="$($Token)" `
-            --name "$($BotName)-$([guid]::NewGuid())" g4-cron-bot:latest
+        Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$($BotName)'."
+        Write-Verbose "Building the Docker command from the specified parameters."
+        $cmdLines = @(
+            "run -d -v `"$($BotVolume):/bots`"",
+            " -e BOT_NAME=`"$($BotName)`"",
+            " -e CRON_SCHEDULES=`"$($CronSchedules)`"",
+            " -e DRIVER_BINARIES=`"$($DriverBinaries)`"",
+            " -e HUB_URI=`"$($HubUri)`"",
+            " -e TOKEN=`"$($Token)`"",
+            " --name `"$($BotName)-$([guid]::NewGuid())`" g4-cron-bot:latest"
+        )
+
+        Write-Verbose "Joining command parts into a single Docker command string."
+        $dockerCmd = $cmdLines -join [string]::Empty
+
+        Write-Host "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
+        $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
+        $process.WaitForExit(60000)
         
         Write-Verbose "Docker container '$($BotName)' started successfully."
         Exit 0
     }
     catch {
-        # If an error occurs while starting the Docker container, output the error and exit with a non-zero code.
         Write-Error "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
         Exit 1
     }
@@ -149,11 +157,23 @@ if ($Docker) {
 
 try {
     Write-Verbose "Setting Environment Parameters"
-    Import-EnvironmentVariablesFile -SkipNames @("BOT_NAME", "CRON_SCHEDULES", "DRIVER_BINARIES", "HUB_URI", "TOKEN")   
+    Import-EnvironmentVariablesFile  
 }
 catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
+
+Write-Verbose "Constructing the command line for 'Start-CronBot.ps1' with the user parameters"
+$cmdLines = @(
+    ".\Start-CronBot.ps1",
+    "-BotVolume `"$($BotVolume)`"",
+    "-BotName `"$($BotName)`"",
+    "-CronSchedules `"$($CronSchedules)`"",
+    "-DriverBinaries `"$($DriverBinaries)`"",
+    "-HubUri `"$($HubUri)`"",
+    "-Token `"$($Token)`""
+) -join " "
+Write-Host "Invoking Process with the following command:$([System.Environment]::NewLine)$($cmdLines)"
 
 # Build the final request URL by removing any trailing slash from $HubUri and appending the endpoint path.
 $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
