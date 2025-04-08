@@ -214,18 +214,6 @@ catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
 
-Write-Verbose "Constructing the command line for 'Start-StaticBot.ps1' with the user parameters"
-$cmdLines = @(
-    ".\Start-StaticBot.ps1",
-    "-BotVolume `"$($BotVolume)`"",
-    "-BotName `"$($BotName)`"",
-    "-DriverBinaries `"$($DriverBinaries)`"",
-    "-HubUri `"$($HubUri)`"",
-    "-IntervalTime $($IntervalTime)",
-    "-Token `"$($Token)`""
-) -join " "
-Write-Host "Invoking Process with the following command:$([System.Environment]::NewLine)$($cmdLines)"
-
 # Construct the full request URL by trimming any trailing slash from $HubUri and appending the endpoint path.
 $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
 
@@ -236,6 +224,7 @@ $botFilePath            = Join-Path $botAutomationDirectory "automation.json"
 $errorsDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "errors")
 $outputDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
 
+Clear-Host
 Write-Host
 Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
 

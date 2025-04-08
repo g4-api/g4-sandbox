@@ -325,18 +325,6 @@ catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
 
-Write-Verbose "Constructing the command line for 'Start-FileListenerBot.ps1' with the user parameters"
-$cmdLines = @(
-    ".\Start-FileListenerBot.ps1",
-    "-BotVolume `"$($BotVolume)`"",
-    "-BotName `"$($BotName)`"",
-    "-DriverBinaries `"$($DriverBinaries)`"",
-    "-HubUri `"$($HubUri)`"",
-    "-IntervalTime $($IntervalTime)",
-    "-Token `"$($Token)`""
-) -join " "
-Write-Host "Invoking Process with the following command:$([System.Environment]::NewLine)$($cmdLines)"
-
 # Construct the request URI by ensuring no trailing slash exists and appending the API endpoint.
 $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
 
@@ -348,6 +336,7 @@ $botDirectory           = Join-Path $BotVolume $BotName
 $botAutomationDirectory = Join-Path $botDirectory "bot"
 $botFilePath            = Join-Path $botAutomationDirectory "automation.json"
 
+Clear-Host
 Write-Host
 Write-Host "Listening for incoming files for bot '$BotName' in directory '$inputDirectory'.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
 

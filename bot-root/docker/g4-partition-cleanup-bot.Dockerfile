@@ -23,11 +23,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Echo the variables in the desired format during build
-RUN echo "BOT_NAME: ${BOT_NAME}" && \
-    echo "DRIVER_BINARIES: ${DRIVER_BINARIES}" && \
-    echo "HUB_URI: ${HUB_URI}" && \
-    echo "INTERVAL_TIME: ${INTERVAL_TIME}" && \
-    echo "TOKEN: ${TOKEN}"
+RUN echo "CLEANUP_BOT_INTERVAL_TIME: ${CLEANUP_BOT_INTERVAL_TIME}" && \
+    echo "CLEANUP_BOT_NUNBER_OF_FILES: ${CLEANUP_BOT_NUNBER_OF_FILES}"
 
 # Create the /bots directory and ensure it has read/write permissions
 RUN mkdir -p /bots && chmod 777 /bots
@@ -37,14 +34,14 @@ WORKDIR /app
 
 # Copy the PowerShell script and .env file into the container
 COPY .env /app/.env
-COPY Start-StaticBot.ps1 /app/Start-StaticBot.ps1
+COPY Start-CleanupBot.ps1 /app/Start-CleanupBot.ps1
 
 # Make script executable (optional good practice)
-RUN chmod +x /app/Start-StaticBot.ps1
+RUN chmod +x /app/Start-CleanupBot.ps1
 
 # Pass four parameters to the script:
 #   1) The bot volume location (/bot)
 #   2) BotName from environment variable
 #   3) HubUri from environment variable
 #   4) IntervalTime from environment variable
-CMD ["pwsh", "-Command", "./Start-StaticBot.ps1 /bots $env:BOT_NAME $env:DRIVER_BINARIES $env:HUB_URI $env:INTERVAL_TIME $env:TOKEN"]
+CMD ["pwsh", "-Command", "./Start-CleanupBot.ps1 /bots $env:CLEANUP_BOT_NUNBER_OF_FILES $env:CLEANUP_BOT_INTERVAL_TIME"]

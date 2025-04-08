@@ -163,24 +163,13 @@ catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
 
-Write-Verbose "Constructing the command line for 'Start-CronBot.ps1' with the user parameters"
-$cmdLines = @(
-    ".\Start-CronBot.ps1",
-    "-BotVolume `"$($BotVolume)`"",
-    "-BotName `"$($BotName)`"",
-    "-CronSchedules `"$($CronSchedules)`"",
-    "-DriverBinaries `"$($DriverBinaries)`"",
-    "-HubUri `"$($HubUri)`"",
-    "-Token `"$($Token)`""
-) -join " "
-Write-Host "Invoking Process with the following command:$([System.Environment]::NewLine)$($cmdLines)"
-
 # Build the final request URL by removing any trailing slash from $HubUri and appending the endpoint path.
 $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
 
 # Construct the full path to the output directory where responses will be saved.
 $outputDirectory = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
 
+Clear-Host
 Write-Host
 Write-Host "Starting bot process.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
 

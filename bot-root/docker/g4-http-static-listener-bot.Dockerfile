@@ -7,6 +7,9 @@ EXPOSE 8080
 # Prevent interactive dialogs during package install
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Ensure that PowerShell and any utilities that depend on it have the necessary terminal information
+ENV TERM=xterm
+
 # Install prerequisites
 RUN apt-get update && \
     apt-get install -y wget apt-transport-https software-properties-common gnupg && \

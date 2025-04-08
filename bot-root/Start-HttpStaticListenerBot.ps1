@@ -300,6 +300,7 @@ function Write-Response {
     }
 }
 
+Clear-Host
 Write-Verbose "Construct the base endpoint for the bot"
 $botRoute    = "/bot/v1"
 $botEndpoint = "http://+:$($HostPort)$($botRoute)/$BotName"
@@ -345,20 +346,6 @@ try {
 catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException())"
 }
-
-Write-Verbose "Constructing the command line for 'Start-HttpStaticListenerBot.ps1' with the user parameters"
-$cmdLines = @(
-    ".\Start-HttpStaticListenerBot.ps1",
-    "-BotVolume `"$($BotVolume)`"",
-    "-BotName `"$($BotName)`"",
-    "-HostPort $($HostPort)",
-    "-ContentType `"$($ContentType)`"",
-    "-DriverBinaries `"$($DriverBinaries)`"",
-    "-HubUri `"$($HubUri)`"",
-    "-Base64ResponseContent `"$($Base64ResponseContent)`"",
-    "-Token `"$($Token)`""
-) -join " "
-Write-Host "Invoking Process with the following command:$([System.Environment]::NewLine)$($cmdLines)"
 
 Write-Verbose "Creating HttpListener object"
 $listener = New-Object System.Net.HttpListener

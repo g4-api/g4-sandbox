@@ -383,6 +383,11 @@ function Show-Wizard {
     try {
         # Start the process using the determined shell.
         $process = Start-Process -FilePath $shell -ArgumentList $argumentList -PassThru
+        Write-Host "Invoking Process with the following command:"
+        Write-Host
+        Write-Host "--- START ---"
+        Write-Host "$($shell) $($argumentList)"
+        Write-Host "--- END   ---"
     }
     catch {
         Write-Error "Error executing script $($ScriptToRun): $($_.Exception.GetBaseException())"
@@ -440,6 +445,11 @@ function Show-DockerImageSubmenu {
             Dockerfile  = "docker/g4-static-bot.Dockerfile"
             DefaultTag  = "g4-static-bot:latest"
             Name        = "Static Bot"
+        },
+        [ordered]@{
+            Dockerfile  = "docker/g4-partition-cleanup-bot.Dockerfile"
+            DefaultTag  = "g4-partition-cleanup-bot:latest"
+            Name        = "Partition Cleanup Bot"
         }
     )
 
@@ -612,7 +622,8 @@ function Show-LaunchBotSubmenu {
         @{ Name = "HTTP Post Listener Bot";         Script = "./Start-HttpPostListenerBot.ps1" },
         @{ Name = "HTTP Query String Listener Bot"; Script = "./Start-HttpQsListenerBot.ps1" },
         @{ Name = "HTTP Static Listener Bot";       Script = "./Start-HttpStaticListenerBot.ps1" },
-        @{ Name = "Static Bot";                     Script = "./Start-StaticBot.ps1" }
+        @{ Name = "Static Bot";                     Script = "./Start-StaticBot.ps1" },
+        @{ Name = "Partition Cleanup Bot";          Script = "./Start-CleanupBot.ps1" }
     )
 
     # Begin a continuous loop until the user chooses to go back.
@@ -657,6 +668,9 @@ function Show-LaunchBotSubmenu {
                 }
                 "Static Bot" {
                     Start-StaticBotWizard -Script $selectedOption.Script
+                }
+                "Partition Cleanup Bot" {
+                    Start-PartitionCleanupBotWizard -Script $selectedOption.Script
                 }
                 default {
                     Write-Host "Launching for $($selectedOption.Name) is not implemented yet." -ForegroundColor Yellow
@@ -1561,6 +1575,82 @@ function Start-NewPartitionWizard {
         -Title            "Initialize a New G4-Bot Partition Wizard" `
         -WizardParameters $WizardParameters `
         -ScriptToRun      "./Initialize-G4BotPartition.ps1"
+}
+
+function Start-PartitionCleanupBotWizard {
+    <#
+    .SYNOPSIS
+        Launches a wizard to configure and start the Partition Cleanup Bot.
+
+    .DESCRIPTION
+        The Start-PartitionCleanupBotWizard function creates a wizard interface that allows users to input or confirm the configuration parameters
+        required to run the Partition Cleanup Bot. The wizard gathers values for the bot's root operating directory, the number of files to retain 
+        in each target folder, and the cleanup interval. These parameters can be pre-populated with environment variable values and default values.
+    
+        Once the user completes the wizard, the specified script (or command) is executed with the configured parameters. This function leverages 
+        the Show-Wizard function to display the UI and handle user input.
+
+    .PARAMETER Script
+        The script or command to execute after the wizard completes. This script is run using the parameters configured via the wizard.
+
+    .EXAMPLE
+        Start-PartitionCleanupBotWizard -Script "C:\Scripts\CleanupScript.ps1"
+        This command launches the wizard titled "Launch Partition Cleanup Bot" for configuration, and once the user completes the wizard,
+        the CleanupScript.ps1 will be executed with the specified parameters.
+
+    .NOTES
+        The wizard uses the following environment variables if present:
+          - BOT_VOLUME: Sets the initial value for the BotVolume parameter.
+          - CLEANUP_BOT_NUNBER_OF_FILES: Sets the initial value for NumberOfFilesToRetain.
+          - CLEANUP_BOT_INTERVAL_TIME: Sets the initial value for the IntervalTime.
+    #>
+    param(
+        $Script
+    )
+
+    # Define wizard parameters as an array of ordered hashtables.
+    # Each ordered hashtable ensures that the keys appear in the specified order:
+    # Default, Description, Mandatory, and Name.
+    $wizardParameters = @(
+        [ordered]@{
+            Default          = ""
+            Description      = "The root directory where the bot will operate."
+            EnvironmentValue = $env:BOT_VOLUME
+            Mandatory        = $true
+            Name             = "BotVolume"
+            Type             = "String"
+        },
+        [ordered]@{
+            Default          = 3
+            Description      = "The number of newest files to retain per target folder."
+            EnvironmentValue = $env:CLEANUP_BOT_NUNBER_OF_FILES
+            Mandatory        = $true
+            Name             = "NumberOfFilesToRetain"
+            Type             = "Number"
+        },
+        [ordered]@{
+            Default          = 86400
+            Description      = "The time interval (in seconds) between cleanup cycles."
+            EnvironmentValue = $env:CLEANUP_BOT_INTERVAL_TIME
+            Mandatory        = $true
+            Name             = "IntervalTime"
+            Type             = "Number"
+        },
+        [ordered]@{
+            Default          = $false
+            Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
+            EnvironmentValue = ""
+            Mandatory        = $false
+            Name             = "Docker"
+            Type             = "Switch"
+        }
+    )
+
+    # Call the Show-Wizard function with the specified title, wizard parameters, and script.
+    Show-Wizard `
+        -Title            "Launch Partition Cleanup Bot" `
+        -WizardParameters $wizardParameters `
+        -ScriptToRun      $Script
 }
 
 function Start-StaticBotWizard {
