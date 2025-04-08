@@ -1,0 +1,66 @@
+response must be in json format
+need to be precise - if user ask for click by xpath - don't unrelated examples like coordinates
+need to be precise - if user ask for click don't give double click or context click or similar
+if no exact example - clearly say that you don't have an example
+
+
+provide strict json structure for each entity
+provide explicit examples - in a different knowledge
+prioritize the examples
+provide examples for all permutations - including locators, different parameters useage and end cases
+provide clear instruction of how to use the "platforms" fields to identify which plugins to use
+
+Built as short as possible system prompt 
+
+
+
+Okay, so I'm trying to figure out how to type text into a specific element on a web browser using some kind of automation tool or plugin. The user mentioned something about the G4 Automation Engine, which sounds pretty powerful but also a bit complicated for me right now.
+
+First, I guess I need to understand what they mean by "typing text into an element." That would probably involve clicking somewhere on the webpage and then entering some characters, right? But how do you automate that process?
+
+I remember seeing in the previous examples something about using XPath expressions. Maybe that's involved here. XPath is used to locate elements on a web page programmatically, so perhaps I need to write an XPath expression that finds the element where I want to type.
+
+But wait, what if there are multiple elements with similar names or classes? Shouldn't have issues with specificity? Or maybe the element has unique attributes or something. Hmm.
+
+Then there's the part about sending text into a field. I suppose once you click on the right spot, you need to send some text via JavaScript or another scripting language supported by the automation tool. Maybe using document.querySelector in JavaScript?
+
+Also, the user mentioned something about using the TextIntoElement plugin if it exists. But I'm not sure if that's an actual plugin available for this purpose. It might be a hypothetical example.
+
+I should also consider error handling. What if the element isn't found? How does the tool handle missing elements or empty fields? Maybe there are parameters to specify default text if the field is blank?
+
+Another thought: can I combine multiple actions in one rule, like clicking an element and then typing some text? Or do I need separate rules for each action?
+
+I'm a bit confused about how exactly the parameters should be structured. Should they follow a specific format with pluginName, argument, and other properties?
+
+Wait, looking back at the previous example, there was something called InvokeUser32SendKey plugin which allows sending keys like spacebar or Enter. Maybe I can combine that with clicking an element.
+
+So perhaps the steps are:
+
+Click on the target element using XPath.
+Send specific text into it using the send key action.
+But how do these actions work together? Do they run sequentially, and is there a way to chain them?
+
+I'm also wondering about the parameters for each action. For example, does clicking an element require any offset or alignment settings if it's not a direct click?
+
+This is getting complicated. Maybe I need to look up some documentation on the G4 Automation Engine specifically regarding text input into elements.
+
+But since this is my thought process, let me try to outline how I'd approach creating such a rule:
+
+Identify the element where the text needs to be typed. 
+Use XPath to specify its location (e.g., //button[@id='submitButton']).
+Set up the automation steps: 
+Click on the identified element.
+After clicking, send the desired text using the appropriate key action.
+I'm not sure about the exact syntax for combining these actions in the rule configuration. Maybe I need to use a macro or some kind of sequence builder within the plugin's arguments.
+
+Wait, perhaps there's a way to combine sending keys and clicking in one argument using parameters. For example, first clicking on an element and then sending text with specific key presses.
+
+But how are these actions nested or chained? Do they execute independently, or is there a dependency?
+
+Also, considering that sending text into a field might require the element to be clickable after the click action. Should I verify that the text was correctly entered somehow?
+
+This makes me realize that besides typing text, I might need additional validation steps to ensure that the input was successful before proceeding further in the automation flow.
+
+Overall, while I have a general idea of what needs to be done—clicking an element and entering text—it's unclear how these two actions are integrated into the rule configuration using the G4 Automation Engine's API or plugin structure.
+
+Maybe looking at existing examples would help. Unfortunately, since none were provided in this context, I need to rely on best practices and logical deduction to piece together the correct setup. 

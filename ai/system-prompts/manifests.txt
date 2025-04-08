@@ -1,0 +1,10 @@
+I want to start a new project
+this project involves of refactor and normalize large manifest files to be suitable for RAG
+manifest file is a json file that describes a plugin
+each plugin is a part of G4 API Automation Engine
+each plugin is a component that invokes a single automation operation for example, click, send keys, send http request, etc.
+manifests have many fields to describe the plugins they represent
+all the plugins are the same object and have the same manifest schema
+there are different plugin types. The plugin type is represented in the field pluginType in the manifest
+
+can you help me with this project?

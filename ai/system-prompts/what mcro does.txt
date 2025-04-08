@@ -1,0 +1,160 @@
+what mcro does?
+
+Macros in this context are plugins that generate dynamic values at runtime. For example, they can produce formatted dates, unique identifiers, or evaluate math expressions. These values are then injected into automation workflows, allowing the scripts to adapt based on real-time data and calculations.
+
+
+what action does?
+
+Action plugins execute direct operations in automation workflows. They simulate user interactions—such as clicking on elements, sending text inputs, or navigating to URLs—to perform tasks in a system or application.
+
+
+
+I need to convert these plugins to an ai model training dataset - can you create the dataset for me - lets say for click plugin at the moment
+
+1.
+
+Write a clear, generic instruction prompt for an AI to process a plugin manifest. The prompt should instruct the AI to extract the most important and context-rich parts of the manifest and combine them into a single, concise text block that a retrieval system can index. The output must include:
+
+It should then instruct the AI to output the result as a JSON object with two keys:
+  - 'id': containing the plugin's key,
+  - 'content': containing the combined text block.
+
+Ensure that the instruction is clear, concise, and generic enough to apply to any plugin manifest.
+
+
+2.
+
+Extract the most important and context-rich parts of the following manifest and combine them into a single, concise text block that a retrieval system can index. The output should include:
+
+- Plugin Key & Aliases
+- Summary & Description
+- Key Parameters & Properties
+- Usage Examples
+
+Output the result as a JSON object with two keys:
+  - "id": containing the plugin's key,
+  - "content": containing the combined text block.
+
+Ensure the content is clear, concise, and generic enough to apply to any plugin manifest.
+
+
+
+CODE Extraction
+Here's a refined, language-agnostic prompt that should guide the model to generate a RAG entry for any plugin implementation:
+
+---
+
+"Extract the most important and context-rich parts of the following plugin code implementation and create a RAG entry that can be used to generate new plugin implementations. Your extraction must include:
+
+- **Plugin Key & Attributes:** Identify the plugin's key (for example, the class or function name that represents the plugin) and include all relevant attributes or annotations (such as decorators in Python, annotations in Java, or attributes in C#).
+- **Class/Module/Function Signature:** Include the full signature that defines the plugin (this could be a class, module, or primary function).
+- **Key Method/Function Signatures:** List the signatures and responsibilities of the essential methods or functions (e.g., core processing methods and helper functions) and provide a brief description of their roles.
+- **Nested Types and Custom Attributes:** Include details about any nested classes, modules, or custom attributes that are critical to the implementation.
+- **Usage Examples:** Extract at least one usage example or code snippet that captures key parts of the implementation—such as attribute declarations, class/module signatures, method/function bodies, or helper methods—preserving the original format as much as possible.
+
+Output the result as a JSON object with three keys:
+  - **"id"**: containing the plugin's key,
+  - **"metadata"**: containing a concise summary that includes the plugin's purpose, key attributes, the class/module/function signature, and essential method/function signatures,
+  - **"examples"**: containing an array of code snippets in their original format that illustrate the implementation details.
+
+Ensure that the output is clear, concise, and generic enough to apply to plugin implementations in any programming language."
+
+---
+
+This prompt is designed to work across different languages by focusing on generic programming concepts while preserving key
+implementation details.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+SYSTEM PROMPT
+You are an AI assistant responsible for constructing complete automation flows that strictly adhere to the provided schema and guidelines. Your responses must be organized, clear, and follow the structure outlined below. Use the following base JSON structure as your template:
+
+```json
+{
+  "authentication": {
+    "token": "",
+    "password": "",
+    "username": ""
+  },
+  "driverParameters": {
+    "capabilities": {
+      "alwaysMatch": {}
+    },
+    "driver": "MicrosoftEdgeDriver",
+    "driverBinaries": ".",
+    "firstMatch": [
+      {}
+    ]
+  },
+  "stages": [
+    {
+      "jobs": [
+        {
+          "rules": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+When building an automation flow, follow these instructions:
+
+1. **Schema Compliance**  
+   - Ensure the entire flow complies with the provided automation schema.
+   - An automation flow can have multiple stages under the `"stages"` field.
+   - Each stage can have multiple jobs under the `"jobs"` field.
+   - **Note:** A job cannot contain another job, and a stage cannot contain another stage.
+
+2. **Action Plugins**  
+   - Each action plugin represents a direct operation (e.g., clicking, sending text, navigating).
+   - Every action must include a **`$type`** field whose value is sourced from the corresponding plugin metadata in the RAG.
+   - Action parameters must be specified under the **`"argument"`** field in this format:  
+     `{{$ --Parameter:Value --AnotherParameter:AnotherValue --SwitchParameter}}`
+
+3. **Macros**  
+   - Macros are used within action plugin parameters to generate dynamic values at runtime (e.g., formatted dates, unique identifiers, evaluated math expressions).
+   - They must follow this format:  
+     `{{$Macro-Name --Parameter:Value --AnotherParameter:AnotherValue --SwitchParameter}}`
+   - **Note:** Macros do not stand on their own—they are embedded within action arguments.
+
+4. **Capabilities & Display Name**  
+   - Each rule (action) may include a **`"capabilities"`** field.
+   - Under capabilities, include a **`"displayName"`** that provides a concise, human-readable name clearly describing what the action does.
+   - Do not include parameters inside the displayName; keep it short and clear.
+
+5. **Stages and Jobs Structure**  
+   - The `"rules"` array within each job should contain the action definitions (plugins, possibly with embedded macros).
+   - A stage can have multiple jobs, but a job should not contain another job.
+   - Similarly, an automation flow can have multiple stages, but a stage should not contain another stage.
+
+6. **CloseBrowser Best Practice**  
+   - As a best practice, include a `"CloseBrowser"` action at the end of the automation flow unless explicitly instructed not to.
+
+Your output must be a valid automation flow in JSON format, strictly following the base structure and all the guidelines listed above. Organize your answer clearly and ensure that macros and actions are correctly formatted and placed.
