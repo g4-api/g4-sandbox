@@ -377,17 +377,58 @@ function Show-Wizard {
     Write-Host "Invoking script: $ScriptToRun" -ForegroundColor Cyan
     Write-Host ""
 
+    # Set a default in case no -WindowStyle switch is provided
+    $windowStyle = "Normal"
+
+    # Iterate over the parameters to find a -WindowStyle override
+    for ($i = 0; $i -lt $parametersCollection.Length; $i++) {
+        $item = $parametersCollection[$i]
+    
+        # Skip any parameter that does not begin with "-WindowStyle"
+        if ($item -notlike "-WindowStyle*") {
+            continue
+        }
+
+        # Remove the "-WindowStyle" prefix, trim whitespace, and strip any surrounding quotes
+        $windowStyle = $item.Replace("-WindowStyle", [string]::Empty).Trim().Replace('"', [string]::Empty)
+
+        # Clear out the processed switch so it isn't picked up again
+        $parametersCollection[$i] = [string]::Empty
+
+        # Stop searching once we've extracted the first WindowStyle value
+        break
+    }
+
+
     # Join the parameters collection into a single string.
-    $argumentList = [string]::Join(' ', $parametersCollection)
+    $argumentList = [string]::Join(' ', $parametersCollection).Trim();
     
     try {
-        # Start the process using the determined shell.
-        $process = Start-Process -FilePath $shell -ArgumentList $argumentList -PassThru
         Write-Host "Invoking Process with the following command:"
         Write-Host
-        Write-Host "--- START ---"
+        Write-Host "--- START SHELL COMMAND ---"
         Write-Host "$($shell) $($argumentList)"
-        Write-Host "--- END   ---"
+        Write-Host "--- END -------------------"
+        Write-Host
+
+        # Start the process using the determined shell.
+        if($shell -eq "powershell") {
+            Start-Process `
+                -FilePath     $shell `
+                -ArgumentList $argumentList `
+                -WindowStyle  ([System.Diagnostics.ProcessWindowStyle]::Parse([System.Diagnostics.ProcessWindowStyle], $windowStyle))
+            
+            Write-Host "--- START PROCESS COMMAND ---"
+            Write-Host "Start-Process -FilePath $($shell) -ArgumentList '$($argumentList)' -WindowStyle $($windowStyle)"
+            Write-Host "--- END ---------------------"
+        }
+        else {
+            Start-Process -FilePath $shell -ArgumentList $argumentList
+            
+            Write-Host "--- START PROCESS COMMAND ---"
+            Write-Host "Start-Process -FilePath $($shell) -ArgumentList '$($argumentList)'"
+            Write-Host "--- END ---------------------"
+        }
     }
     catch {
         Write-Error "Error executing script $($ScriptToRun): $($_.Exception.GetBaseException())"
@@ -1137,6 +1178,14 @@ function Start-CronBotWizard {
             Mandatory        = $false
             Name             = "Docker"
             Type             = "Switch"
+        },
+        [ordered]@{
+            Default          = "Normal"
+            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+            Mandatory        = $false
+            Name             = "WindowStyle"
+            Type             = "String"
         }
     )
 
@@ -1226,6 +1275,14 @@ function Start-FileListenerBotWizard {
             Mandatory        = $false
             Name             = "Docker"
             Type             = "Switch"
+        },
+        [ordered]@{
+            Default          = "Normal"
+            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+            Mandatory        = $false
+            Name             = "WindowStyle"
+            Type             = "String"
         }
     )
 
@@ -1257,24 +1314,23 @@ function Start-G4HubWizard {
         [string]$Script
     )
 
-    # Inform the user that the G4 Hub is being launched.
-    Write-Host "Launching G4 Hub..." -ForegroundColor Cyan
+    # Define wizard parameters for starting the Standalone G4 Hub.
+    $wizardParameters = @(
+        [ordered]@{
+            Default          = "Normal"
+            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+            Mandatory        = $false
+            Name             = "WindowStyle"
+            Type             = "String"
+        }
+    )
 
-    # Determine shell type.
-    $shell = Resolve-Shell
-
-    # Try to execute the provided script.
-    try {
-        $process = Start-Process -FilePath $shell -ArgumentList $Script -PassThru
-    }
-    catch {
-        Write-Error "Error launching G4 Hub: $($_.Exception.GetBaseException())"
-    }
-
-    # Prompt the user to press any key to return to the previous menu.
-    Write-Host ""
-    Write-Host "Press any key to return to the previous menu..."
-    Read-Host
+    # Invoke the wizard to launch the G4 Hub.
+    Show-Wizard `
+        -Title            "Launch G4 Hub" `
+        -WizardParameters $wizardParameters `
+        -ScriptToRun      $Script
 }
 
 function Start-GridHubWizard {
@@ -1512,6 +1568,14 @@ function Start-HttpListenerBotWizard {
             Mandatory        = $false
             Name             = "Docker"
             Type             = "Switch"
+        },
+        [ordered]@{
+            Default          = "Normal"
+            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+            Mandatory        = $false
+            Name             = "WindowStyle"
+            Type             = "String"
         }
     )
 
@@ -1643,6 +1707,14 @@ function Start-PartitionCleanupBotWizard {
             Mandatory        = $false
             Name             = "Docker"
             Type             = "Switch"
+        },
+        [ordered]@{
+            Default          = "Normal"
+            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+            Mandatory        = $false
+            Name             = "WindowStyle"
+            Type             = "String"
         }
     )
 
@@ -1734,6 +1806,14 @@ function Start-StaticBotWizard {
             Mandatory        = $false
             Name             = "Docker"
             Type             = "Switch"
+        },
+        [ordered]@{
+            Default          = "Normal"
+            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+            Mandatory        = $false
+            Name             = "WindowStyle"
+            Type             = "String"
         }
     )
 
@@ -1828,6 +1908,14 @@ function Start-StandaloneUiaDriverServerWizard {
             Mandatory        = $false
             Name             = "ServicePort"
             Type             = "Number"
+        },
+        [ordered]@{
+            Default          = "Normal"
+            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+            Mandatory        = $false
+            Name             = "WindowStyle"
+            Type             = "String"
         }
     )
 

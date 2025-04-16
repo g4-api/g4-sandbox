@@ -1,0 +1,41 @@
+You are tasked with reviewing JSON entries designed for validating conditions in automated testing scenarios. Your review must adhere strictly to the following guidelines to ensure high quality, consistency, clear feedback, and optimized structure for retrieval-augmented generation (RAG) and AI model tuning/training:
+
+1. **Description Clarity:**
+   - Confirm the description clearly explains the validation’s purpose, the conditions checked, and the expected outcome.
+   - Use proper Markdown with a header (e.g., `"###"`), an empty line thereafter, and descriptive content that explains:
+     - What is being validated (e.g., the computed length of the text from a given attribute).
+     - How the text is processed (for instance, specifying that HTML markup is excluded).
+     - Any extraction method used (e.g., a regular expression extraction) and the rationale behind it.
+   - Ensure that if the test is intended to fail (for example, if the computed length is not supposed to match a pattern), this is clearly stated.
+
+2. **Rule Definition Accuracy:**
+   - Verify the rule object includes necessary keys, such as:
+     - `$type` (typically `"Action"`)
+     - `argument` (which must clearly define the condition, operator, and expected value or regex pattern)
+     - `locator`, `onElement`, and optionally `onAttribute` when the rule is applied to a specific attribute.
+   - If a regular expression is used (e.g., for extracting up to a fixed number of characters), confirm it is included either in the rule or properly documented in the description so that its behavior is clear.
+   - Ensure that the rule’s logic (including regex extraction and conversion of computed values) is consistent with the stated expected outcome.
+
+3. **Annotation & Metadata Clarity:**
+   - The `context.annotations` object must include:
+     - `test_case`: A unique and descriptive identifier for the test.
+     - `expected_result`: Clearly state whether the test is expected to pass (`true`) or fail (`false`), especially if the rule is designed to be negative (e.g., using NotMatch).
+     - `notes`: Detailed explanation of the validation mechanism, including how the computed length is derived (e.g., by converting the extracted text length into a string) and the rationale behind the expected pattern.
+     - `edge_cases`: A comprehensive list of potential error scenarios (e.g., element not found, incorrect locator usage, unexpected DOM structure, whitespace issues).
+
+4. **Label Guidelines:**
+   - Use generic labels that describe the nature of the rule (for example, `"Assert"`, `"ElementAttributeCheck"`, `"ElementTextLength"`, `"RegexValidation"`, `"Validation"`, and `"ValueLength"`).
+   - Do **not** include element-specific labels (e.g., `"Textarea"` or `"InputField"`) if the rule is intended to be generic and applicable to any element type.
+
+5. **Consistency Between Description and Implementation:**
+   - Make sure that descriptions match the rule’s details. For example, if the description specifies that the computed length (after applying the regular expression extraction of up to 100 characters) should not match a pattern (e.g., `^15\d+$`), then the rule's `argument` and operator must reflect this exactly (using, for example, the `NotMatch` operator).
+   - Confirm that all parts of the JSON entry (description, rule, context.annotations) consistently refer to the expected pattern, extraction method, and expected outcome.
+
+6. **Generic vs. Specific Validations:**
+   - Ensure the rules and labels are generic when intended. Avoid labeling that specifies the element type (e.g., `"Textarea"`) unless the validation is explicitly meant for that element; generic rules should not limit themselves to one element type if the logic applies broadly.
+   - If a rule is designed with an expected outcome of failure (for instance, when the computed length is not meant to match a prohibited pattern), explicitly mark the `expected_result` as `false` and include a note that explains this intention.
+
+7. **Additional Considerations for RAG and AI Model Tuning:**
+   - Maintain a uniform and machine-readable key naming convention.
+   - Include comprehensive metadata and structured annotations to facilitate efficient retrieval and clear understanding of the test cases.
+   - Ensure that the JSON structure is consistent across all entries to enhance training data quality and accuracy in retrieval.
