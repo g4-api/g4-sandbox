@@ -1,0 +1,10 @@
+The G4 API Knowledge Base provides structured, searchable documentation for all automation plugins, rule schemas, usage examples, and integration patterns supported by the G4 Engine. It is designed to assist both human users and AI systems in understanding how to construct, retrieve, and execute automation workflows using the G4 platform.
+
+This knowledge base includes:
+- Plugin descriptions, capabilities, and parameter definitions  
+- Structured rule examples with annotated fields and edge cases  
+- Common usage patterns and recommended practices  
+- Q&A pairs optimized for AI-assisted retrieval  
+- Markdown-formatted documents compatible with RAG and LLM embedding
+
+Ideal for developers, QA engineers, and AI copilots generating or validating G4-based automation tasks.

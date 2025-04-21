@@ -1,22 +1,46 @@
-Using the manifest for the Assert plugin, generate a RAG-optimized context snippet that includes a "rag" field under "context > integration". The "rag" field must include:
+Given any plugin manifest JSON, insert or update a "rag" object under `context → integration`. The "rag" object must contain exactly two fields:
 
-1. A **description** written in professional, functional terms from an automation user’s perspective. It should explain that the Assert plugin validates critical conditions in automated workflows by ensuring that key UI elements and data values meet predefined expectations. Emphasize that it supports dynamic condition checks and flexible operators, which together maintain process reliability and integrity.
+1. description (string)  
+   - A concise, professional summary written from an automation user's perspective of the plugin's core function.  
+   - Emphasize how it enforces or facilitates critical checks or operations, supports dynamic behaviors or flexible parameters, and preserves workflow reliability.  
+   - Use clear, accessible language suitable for both technical and non‑technical readers.
 
-2. A **qa** array with question-and-answer pairs covering the following topics:
-   - **Basic Overview:**  
-     - For example, "What is the Assert plugin?" and "How does the Assert plugin enhance workflow reliability?"
-   - **Key Features and Parameters:**  
-     - Questions that explain its flexible assertions, regex-based extraction, dynamic condition checks, and robust exception management.  
-     - Include questions on the primary parameters ("Condition", "Expected", "Operator") and configurable properties ("Argument", "Locator", "OnAttribute", "OnElement", "RegularExpression").
-   - **Integration Context:**  
-     - Questions clarifying that context integration is a mechanism for embedding the plugin into external tools (such as the sequential-workflow-designer) to facilitate connectivity with external systems.
-   - **Usage Best Practices:**  
-     - Questions addressing configuration best practices, optimizing workflows, and troubleshooting assertion failures.
-   - **Assert Rule Schema Details:**  
-     - Questions covering the structure of assert rules found under the examples section.  
-     - These should include how fields like "argument", "onElement", "onAttribute", "locator", "regularExpression", and "pluginName" define the rule.
-     - Include an example explanation that shows a sample assert rule JSON with a "$type": "Action" field, and describe its components.
-   - **Manifest Details (excluding summary and examples):**  
-     - Cover details like the manifest version, author information, supported categories, and platforms.
+2. qa (array of objects)  
+   Each object must have exactly two keys:  
+   - "question": a clear, standalone question about the plugin  
+   - "answer": a concise, jargon‑free response that addresses that question  
 
-Return the output in JSON format that renders only the updated "context > integration > rag" field with its "description" and "qa" entries.
+   Include separate Q&A items covering:  
+   - Basic Overview: what the plugin is and why it matters  
+   - Key Features & Parameters: how its main capabilities work and what its primary parameters do  
+   - Integration Context: how it embeds into external tools or workflow designers  
+   - Usage Best Practices: recommended configuration patterns, troubleshooting tips, and optimization advice  
+   - Rule/Schema Details: the structure of its action or rule definitions (for example, `$type`, `pluginName`, `argument`, `onElement`, `onAttribute`, `locator`, `regularExpression`)  
+   - Manifest Metadata: generate distinct Q&A items for **each** metadata field—such as manifestVersion, author (including link if present), categories, platforms, pluginType, scopes, key, summary, properties, parameters, and any others found. Provide a clear question for each field (for example, "What is the manifestVersion?") and an answer that explains its purpose and value. If a field's value is a URL, include it verbatim in the answer so it appears as a reference.  
+   - Source Descriptions: draw on the manifest's existing description arrays (under description, parameters, properties, examples, summary, etc.) to craft accurate and informative Q&A pairs  
+   - Error Handling: how the plugin records failures (it adds an exception to the response and log stream) and that by default the workflow continues unless explicitly configured to stop on error
+
+Output  
+Return only the following JSON fragment, populated as specified:  
+```json
+"context": {
+  "integration": {
+    "rag": {
+      "description": "...",
+      "qa": [
+        { "question": "...", "answer": "..." },
+        ...
+      ]
+    }
+  }
+}
+```
+
+**Your response must be plain UTF-8 safe text only.**  
+- Do not use special characters outside the standard ASCII range.  
+- Avoid all non-standard formatting characters such as:
+  - Curly quotes (“ ” ‘ ’)
+  - En/em dashes (– —)
+  - Non-breaking spaces, ligatures, or typographic symbols  
+- Only use standard straight quotes (`"`, `'`), hyphens (`-`), and regular spaces.  
+- The output must be fully compatible with plain-text systems that only support standard UTF-8 characters.

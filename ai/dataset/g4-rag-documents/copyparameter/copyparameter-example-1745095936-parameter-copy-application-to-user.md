@@ -1,0 +1,29 @@
+### Application to User Parameter Copy Action
+
+User scopes are only valid on Windows environments.  
+This example demonstrates how the CopyParameter plugin takes the full text value of the application-scoped parameter `SourceParam` and stores it into a user-scoped parameter named `TargetParam`.  
+The operation uses the complete text value of `SourceParam`, including any whitespace or formatting.  
+No value transformation occurs; the entire text is copied as-is.  
+The action succeeds only if `SourceParam` exists; otherwise, it fails.
+
+- **Rule Purpose**: Copy the full text value from an application-scoped parameter to a user-scoped parameter without changes  
+- **Type**: Action  
+- **Argument**: Copy full text from source to target parameter  
+  - **Parameters**:  
+    - **TargetParameter**: TargetParam - The name of the user-scoped parameter to receive the copied value  
+    - **TargetScope**: User - Specifies that the target parameter scope is user  
+- **On Attribute**: Application  
+- **On Element**: SourceParam  
+- **Plugin Name**: CopyParameter  
+
+#### Automation Rule (JSON)
+
+```json
+{
+  "$type": "Action",
+  "argument": "{{$ --TargetParameter:TargetParam --TargetScope:User}}",
+  "onAttribute": "Application",
+  "onElement": "SourceParam",
+  "pluginName": "CopyParameter"
+}
+```
