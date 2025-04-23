@@ -176,6 +176,215 @@ function Wait-Interval {
     Start-Sleep -Seconds $IntervalTime
 }
 
+function Get-FreePort {
+    <#
+    .SYNOPSIS
+    Finds and returns an available TCP port on the local machine.
+
+    .DESCRIPTION
+    Creates a temporary TCP listener bound to port 0, which instructs the OS
+    to select an available port. Retrieves that port number, stops the listener,
+    and returns the port for use in your scripts or services.
+
+    .OUTPUTS
+    System.Int32
+
+    .EXAMPLE
+    PS> $port = Get-FreePort
+    PS> Write-Host "Starting server on port $port"
+    #>
+    [CmdletBinding()]
+    param()
+
+    # Create a TcpListener on the loopback interface with port 0 (OS picks a free port)
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 127.0.0.1)
+    try {
+        # Start listening (this allocates the port)
+        $listener.Start()
+
+        # Retrieve the assigned local endpoint and extract the port number
+        $port = ($listener.LocalEndpoint).Port
+
+        # Return the free port number
+        return $port
+    }
+    finally {
+        # Always stop the listener to free up the port
+        $listener.Stop()
+    }
+}
+
+function Start-Monitor {
+    <#
+    .SYNOPSIS
+    Starts the G4 Bot Monitor process with configurable parameters.
+
+    .DESCRIPTION
+    The Start-Monitor function wraps the execution of the G4 Bot Monitor executable, handling both Windows and Unix platforms.
+    It accepts parameters for the executable path, window style (Windows only), SignalR hub URI, bot listener URI, bot name, and bot type.
+    On Windows, it applies the specified window style; on Unix, it launches the process normally.
+
+    .PARAMETER MonitorFilePath
+    Path to the G4 Bot Monitor executable file.
+
+    .PARAMETER WindowStyle
+    Window style for the process on Windows. Valid values are Normal, Hidden, Minimized, Maximized.
+
+    .PARAMETER HubUri
+    URI of the SignalR hub that the monitor will connect to.
+
+    .PARAMETER BotUri
+    URI of the bot listener endpoint that the monitor will host.
+
+    .PARAMETER BotName
+    Logical name under which this bot is registered with the hub.
+
+    .PARAMETER BotType
+    Type or category of the bot for hub registration.
+
+    .PARAMETER BotId
+    Unique identifier for this bot instance.
+
+    .EXAMPLE
+    PS> Start-Monitor -MonitorFilePath "C:\tools\g4-bot-monitor.exe" -HubUri "http://hub:9944" `
+        -BotUri "http://localhost:8080/bot/v1/my-bot" -BotName "my-bot" -BotType "dynamic-bot" -BotId "bot123"
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorFilePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$HubUri,
+
+        [Parameter(Mandatory = $true)]
+        [string]$BotUri,
+
+        [Parameter(Mandatory = $true)]
+        [string]$BotName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$BotType,
+
+        [Parameter(Mandatory = $true)]
+        [string]$BotId,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("Normal","Hidden","Minimized","Maximized")]
+        [string]$WindowStyle = "Normal"
+    )
+
+    # Build the full argument string for the monitor process
+    $argumentList = @(
+        "--HubUri=$($HubUri)"
+        "--Name=`"$($BotName)`""
+        "--Id=$($BotId)"
+        "--Type=`"$($BotType)`""
+        "--ListenerUri=$($BotUri)"
+    ) -join ' '
+
+    Start-Process -FilePath $MonitorFilePath -ArgumentList $argumentList -NoNewWindow -RedirectStandardOutput 'NUL'
+    Write-Verbose "Launched monitor process '$($MonitorFilePath)' with arguments: $($argumentList)"
+
+    # Compute when to stop pinging (10 seconds from now, UTC)
+    $timeout    = [DateTime]::UtcNow.AddSeconds(10)
+
+    # Build the full ping URI: e.g. http://.../monitor/{botId}/ping
+    $monitorUri = "$($BotUri)/monitor/$($BotId)"
+
+    # Track whether the monitor ever responded successfully
+    $isMonitor  = $false
+
+    # Retry loop until timeout
+    Write-Host "Connecting monitor..."
+    while ($timeout -gt [DateTime]::UtcNow) {
+        try {
+            # Attempt to ping the monitor endpoint
+            $response = Invoke-RestMethod -Uri "$($monitorUri)/ping" -Method Get -ErrorAction Stop
+
+            # Inform the user that the monitor is now running
+            Write-Host "Monitor is connected and running at '$($monitorUri)'"
+        }
+        catch {
+            # Suppress any network or HTTP errors and retry
+            $response = $null
+        }
+
+        # If we got a valid HTTP response (<400), mark success and exit loop
+        if ($response -and $response.StatusCode -lt 400) {
+            $isMonitor = $true
+            break
+        }
+
+        # Pause briefly before next attempt
+        Start-Sleep -Milliseconds 500
+    }
+
+    # Warn if the monitor never became responsive
+    if (-not $isMonitor) {
+        Write-Warning "Monitor did not respond at '$($monitorUri)' within 10 seconds."
+    }
+}
+
+function Update-BotStatus {
+    <#
+    .SYNOPSIS
+    Sends a status update for the specified bot to the monitor endpoint.
+
+    .DESCRIPTION
+    The Update-BotStatus function constructs a JSON payload containing the bot’s ID and new status,
+    then POSTs it to the monitor’s `/update` endpoint. On success, it notifies the user of the change.
+    Any errors during the request are caught and suppressed.
+
+    .PARAMETER BotId
+    The unique identifier of the bot whose status is being updated.
+
+    .PARAMETER MonitorUri
+    The base URI of the monitor service (e.g., http://localhost:8080/bot/v1/my-bot).
+
+    .PARAMETER Status
+    The new status string to assign to the bot (e.g., "Running", "Stopped").
+
+    .EXAMPLE
+    PS> Update-BotStatus -BotId "bot123" -MonitorUri "http://localhost:8080/bot/v1/my-bot" -Status "Running"
+    Sends a status update for bot123 indicating it is now Running.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BotId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorUri,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Status 
+    )
+
+    try {
+        # Build the request body as compressed JSON: { "id": "<BotId>", "status": "<Status>" }
+        $jsonBody = @{
+            id     = $BotId
+            status = $Status
+        } | ConvertTo-Json -Compress
+
+        # Send POST to the monitor's /update endpoint with JSON payload
+        $response = Invoke-RestMethod `
+            -Uri         "$MonitorUri/update" `
+            -Method      Post `
+            -ContentType "application/json; charset=utf-8" `
+            -Body        $jsonBody `
+            -ErrorAction Stop
+
+        # Inform the user of successful update
+        Write-Host "Successfully updated bot '$BotId' status to '$($Status)' at '$($MonitorUri)/update'."
+    }
+    catch {
+        # Suppress errors but inform the user of failure
+        Write-Warning "Failed to update status for bot '$BotId' to '$($Status)'. Monitor may be unreachable."
+    }
+}
+
 if ($Docker) {
     try {
         Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$($BotName)'."
@@ -223,10 +432,33 @@ $botAutomationDirectory = Join-Path $botDirectory "bot"
 $botFilePath            = Join-Path $botAutomationDirectory "automation.json"
 $errorsDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "errors")
 $outputDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
+$botId                  = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
 
 Clear-Host
 Write-Host
-Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
+Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script.$([System.Environment]::NewLine)"
+
+# Detect Unix-based platforms
+$monitorFilePath = Join-Path "bot-monitor" "g4-bot-monitor-windows.exe"
+if([Environment]::OSVersion.Platform -eq [System.PlatformID]::Unix) {
+    $monitorFilePath = Join-Path "bot-monitor" "g4-bot-monitor-windows"
+}
+
+$hostPort   = Get-FreePort
+$botRoute   = "/bot/v1"
+$botUri     = "http://localhost:$($HostPort)$($botRoute)/$($BotName)"
+$monitorUri = "http://localhost:$($HostPort)$($botRoute)/$($BotName)/monitor/$($botId)"
+
+Write-Host "Free TCP port found: $($hostPort)"
+
+# Invoke the Start-Monitor function with all required parameters
+Start-Monitor `
+    -MonitorFilePath (Join-Path $PSScriptRoot $monitorFilePath) `
+    -HubUri          $HubUri `
+    -BotUri          $botUri `
+    -BotName         $BotName `
+    -BotType         "Static Bot" `
+    -BotId           $botId
 
 while ($true) {
     try {
@@ -267,6 +499,9 @@ while ($true) {
         $botBytes = [System.Text.Encoding]::UTF8.GetBytes($botFileContent)
         $botContent = [System.Convert]::ToBase64String($botBytes)
 
+        # Update the bot status to 'Working'
+        Update-BotStatus -BotId $botId -MonitorUri $monitorUri -Status "Working"
+
         # Send the Base64-encoded JSON to the remote endpoint using a POST request.
         Write-Host
         Write-Host "Sending Base64-encoded 'automation.json' to remote endpoint"
@@ -279,6 +514,9 @@ while ($true) {
         @{ error = $baseException.StackTrace; message = $baseException.Message } | ConvertTo-Json -Compress | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
     }
     finally {
+        # Update the bot status to 'Ready'
+        Update-BotStatus -BotId $botId -MonitorUri $monitorUri -Status "Ready"
+
         try {
             if($null -ne $outputFilePath -and $response) {
                 $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue

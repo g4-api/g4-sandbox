@@ -355,7 +355,7 @@ function Get-Embedding {
         -Uri $EmbeddingApiUri `
         -Headers $Headers `
         -Body $body `
-        -ContentType 'application/json'
+        -ContentType '"application/json; charset=utf-8"'
 
     # Return the embedding vector from the first data element
     return $response.data[0].embedding

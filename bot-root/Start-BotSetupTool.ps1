@@ -402,7 +402,7 @@ function Show-Wizard {
 
     # Join the parameters collection into a single string.
     $argumentList = [string]::Join(' ', $parametersCollection).Trim();
-    
+
     try {
         Write-Host "Invoking Process with the following command:"
         Write-Host
