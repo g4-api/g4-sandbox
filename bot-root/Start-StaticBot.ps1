@@ -1,4 +1,4 @@
-<# 
+<#
 .SYNOPSIS
     Periodically processes an 'automation.json' file by encoding its content in Base64,
     sending it to a remote endpoint, and saving both the responses and any errors.
@@ -38,6 +38,10 @@
 .PARAMETER IntervalTime
     The time interval (in seconds) to wait between successive invocations (e.g., 120 for 2 minutes).
 
+.PARAMETER ListenerPort
+    The port used by the background job’s HTTP listener to receive incoming requests.  
+    If not specified, a default of 8085 will be used.
+
 .PARAMETER Token
     The authentication token required for the bot's operation. This token is inserted into the automation JSON.
 
@@ -47,7 +51,7 @@
 .PARAMETER Docker
     Switch to run the script inside a Docker container. When specified, the script will launch a Docker container
     using the given parameters and then exit.
-    
+
 .EXAMPLE
     .\Start-StaticBot.ps1 `
         -BotVolume "C:\g4-bots-volume" `
@@ -55,20 +59,45 @@
         -DriverBinaries "http://host.k8s.internal" `
         -HubUri "http://host.docker.internal:9944" `
         -IntervalTime 120 `
+        -ListenerPort 8085 `
         -Token "your_token" `
         -RetentionThreshold 100 `
         -Docker
 #>
+[CmdletBinding()]
 param (
-    [CmdletBinding()]
-    [Parameter(Mandatory = $true)] [string]$BotVolume,
-    [Parameter(Mandatory = $true)] [string]$BotName,
-    [Parameter(Mandatory = $true)] [string]$DriverBinaries,
-    [Parameter(Mandatory = $true)] [string]$HubUri,
-    [Parameter(Mandatory = $true)] [string]$IntervalTime,
-    [Parameter(Mandatory = $true)] [string]$Token,
-    [Parameter(Mandatory = $false)][switch]$Docker
+    [Parameter(Mandatory = $true)]  [string]  $BotVolume,
+    [Parameter(Mandatory = $true)]  [string]  $BotName,
+    [Parameter(Mandatory = $true)]  [string]  $DriverBinaries,
+    [Parameter(Mandatory = $true)]  [string]  $HubUri,
+    [Parameter(Mandatory = $true)]  [string]  $IntervalTime,
+    [Parameter(Mandatory = $false)] [int]     $ListenerPort,
+    [Parameter(Mandatory = $true)]  [string]  $Token,
+    [Parameter(Mandatory = $false)] [int]     $RetentionThreshold,
+    [Parameter(Mandatory = $false)] [switch]  $Docker
 )
+
+# Called on any PowerShell exit: normal return, exception, SIGTERM, CTRL+C, etc.
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Remove-Jobs } | Out-Null
+
+# Import the BotMonitor module from the 'modules' subfolder of the script root
+# Using [System.IO.Path]::Combine ensures cross-platform path correctness
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotMonitor.psm1')) -Force
+
+# Configure all cmdlets to automatically show Information-stream messages by default
+# This makes Write-Information calls visible without needing -InformationAction on each call
+$PSDefaultParameterValues['*:InformationAction'] = 'Continue'
+
+# Change the current directory to the script's folder, ensuring relative paths resolve correctly
+Set-Location -Path $PSScriptRoot
+
+# Find and assign a free TCP port on the Docker host for publishing
+if(-not $ListenerPort) {
+    $ListenerPort = Get-FreePort
+}
+
+# Defines the type of bot instance for logging, metrics, and routing logic
+$botType = "static-bot"
 
 function Import-EnvironmentVariablesFile {
     <#
@@ -176,215 +205,6 @@ function Wait-Interval {
     Start-Sleep -Seconds $IntervalTime
 }
 
-function Get-FreePort {
-    <#
-    .SYNOPSIS
-    Finds and returns an available TCP port on the local machine.
-
-    .DESCRIPTION
-    Creates a temporary TCP listener bound to port 0, which instructs the OS
-    to select an available port. Retrieves that port number, stops the listener,
-    and returns the port for use in your scripts or services.
-
-    .OUTPUTS
-    System.Int32
-
-    .EXAMPLE
-    PS> $port = Get-FreePort
-    PS> Write-Host "Starting server on port $port"
-    #>
-    [CmdletBinding()]
-    param()
-
-    # Create a TcpListener on the loopback interface with port 0 (OS picks a free port)
-    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 127.0.0.1)
-    try {
-        # Start listening (this allocates the port)
-        $listener.Start()
-
-        # Retrieve the assigned local endpoint and extract the port number
-        $port = ($listener.LocalEndpoint).Port
-
-        # Return the free port number
-        return $port
-    }
-    finally {
-        # Always stop the listener to free up the port
-        $listener.Stop()
-    }
-}
-
-function Start-Monitor {
-    <#
-    .SYNOPSIS
-    Starts the G4 Bot Monitor process with configurable parameters.
-
-    .DESCRIPTION
-    The Start-Monitor function wraps the execution of the G4 Bot Monitor executable, handling both Windows and Unix platforms.
-    It accepts parameters for the executable path, window style (Windows only), SignalR hub URI, bot listener URI, bot name, and bot type.
-    On Windows, it applies the specified window style; on Unix, it launches the process normally.
-
-    .PARAMETER MonitorFilePath
-    Path to the G4 Bot Monitor executable file.
-
-    .PARAMETER WindowStyle
-    Window style for the process on Windows. Valid values are Normal, Hidden, Minimized, Maximized.
-
-    .PARAMETER HubUri
-    URI of the SignalR hub that the monitor will connect to.
-
-    .PARAMETER BotUri
-    URI of the bot listener endpoint that the monitor will host.
-
-    .PARAMETER BotName
-    Logical name under which this bot is registered with the hub.
-
-    .PARAMETER BotType
-    Type or category of the bot for hub registration.
-
-    .PARAMETER BotId
-    Unique identifier for this bot instance.
-
-    .EXAMPLE
-    PS> Start-Monitor -MonitorFilePath "C:\tools\g4-bot-monitor.exe" -HubUri "http://hub:9944" `
-        -BotUri "http://localhost:8080/bot/v1/my-bot" -BotName "my-bot" -BotType "dynamic-bot" -BotId "bot123"
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$MonitorFilePath,
-
-        [Parameter(Mandatory = $true)]
-        [string]$HubUri,
-
-        [Parameter(Mandatory = $true)]
-        [string]$BotUri,
-
-        [Parameter(Mandatory = $true)]
-        [string]$BotName,
-
-        [Parameter(Mandatory = $true)]
-        [string]$BotType,
-
-        [Parameter(Mandatory = $true)]
-        [string]$BotId,
-
-        [Parameter(Mandatory = $false)]
-        [ValidateSet("Normal","Hidden","Minimized","Maximized")]
-        [string]$WindowStyle = "Normal"
-    )
-
-    # Build the full argument string for the monitor process
-    $argumentList = @(
-        "--HubUri=$($HubUri)"
-        "--Name=`"$($BotName)`""
-        "--Id=$($BotId)"
-        "--Type=`"$($BotType)`""
-        "--ListenerUri=$($BotUri)"
-    ) -join ' '
-
-    Start-Process -FilePath $MonitorFilePath -ArgumentList $argumentList -NoNewWindow -RedirectStandardOutput 'NUL'
-    Write-Verbose "Launched monitor process '$($MonitorFilePath)' with arguments: $($argumentList)"
-
-    # Compute when to stop pinging (10 seconds from now, UTC)
-    $timeout    = [DateTime]::UtcNow.AddSeconds(10)
-
-    # Build the full ping URI: e.g. http://.../monitor/{botId}/ping
-    $monitorUri = "$($BotUri)/monitor/$($BotId)"
-
-    # Track whether the monitor ever responded successfully
-    $isMonitor  = $false
-
-    # Retry loop until timeout
-    Write-Host "Connecting monitor..."
-    while ($timeout -gt [DateTime]::UtcNow) {
-        try {
-            # Attempt to ping the monitor endpoint
-            $response = Invoke-RestMethod -Uri "$($monitorUri)/ping" -Method Get -ErrorAction Stop
-
-            # Inform the user that the monitor is now running
-            Write-Host "Monitor is connected and running at '$($monitorUri)'"
-        }
-        catch {
-            # Suppress any network or HTTP errors and retry
-            $response = $null
-        }
-
-        # If we got a valid HTTP response (<400), mark success and exit loop
-        if ($response -and $response.StatusCode -lt 400) {
-            $isMonitor = $true
-            break
-        }
-
-        # Pause briefly before next attempt
-        Start-Sleep -Milliseconds 500
-    }
-
-    # Warn if the monitor never became responsive
-    if (-not $isMonitor) {
-        Write-Warning "Monitor did not respond at '$($monitorUri)' within 10 seconds."
-    }
-}
-
-function Update-BotStatus {
-    <#
-    .SYNOPSIS
-    Sends a status update for the specified bot to the monitor endpoint.
-
-    .DESCRIPTION
-    The Update-BotStatus function constructs a JSON payload containing the bot’s ID and new status,
-    then POSTs it to the monitor’s `/update` endpoint. On success, it notifies the user of the change.
-    Any errors during the request are caught and suppressed.
-
-    .PARAMETER BotId
-    The unique identifier of the bot whose status is being updated.
-
-    .PARAMETER MonitorUri
-    The base URI of the monitor service (e.g., http://localhost:8080/bot/v1/my-bot).
-
-    .PARAMETER Status
-    The new status string to assign to the bot (e.g., "Running", "Stopped").
-
-    .EXAMPLE
-    PS> Update-BotStatus -BotId "bot123" -MonitorUri "http://localhost:8080/bot/v1/my-bot" -Status "Running"
-    Sends a status update for bot123 indicating it is now Running.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$BotId,
-
-        [Parameter(Mandatory = $true)]
-        [string]$MonitorUri,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Status 
-    )
-
-    try {
-        # Build the request body as compressed JSON: { "id": "<BotId>", "status": "<Status>" }
-        $jsonBody = @{
-            id     = $BotId
-            status = $Status
-        } | ConvertTo-Json -Compress
-
-        # Send POST to the monitor's /update endpoint with JSON payload
-        $response = Invoke-RestMethod `
-            -Uri         "$MonitorUri/update" `
-            -Method      Post `
-            -ContentType "application/json; charset=utf-8" `
-            -Body        $jsonBody `
-            -ErrorAction Stop
-
-        # Inform the user of successful update
-        Write-Host "Successfully updated bot '$BotId' status to '$($Status)' at '$($MonitorUri)/update'."
-    }
-    catch {
-        # Suppress errors but inform the user of failure
-        Write-Warning "Failed to update status for bot '$BotId' to '$($Status)'. Monitor may be unreachable."
-    }
-}
-
 if ($Docker) {
     try {
         Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$($BotName)'."
@@ -392,11 +212,12 @@ if ($Docker) {
         $cmdLines = @(
             "run -d -v `"$($BotVolume):/bots`"",
             " -e BOT_NAME=`"$($BotName)`"",
+            " -e LISTENER_PORT=$($ListenerPort)",
             " -e DRIVER_BINARIES=`"$($DriverBinaries)`"",
             " -e HUB_URI=`"$($HubUri)`"",
             " -e INTERVAL_TIME=`"$($IntervalTime)`"",
             " -e TOKEN=`"$($Token)`"",
-            " --name `"$($BotName)-$([guid]::NewGuid())`" g4-static-bot:latest"
+            " -p $($ListenerPort):$($ListenerPort) --name `"$($BotName)-$([guid]::NewGuid())`" g4-static-bot:latest"
         )
         
         Write-Verbose "Joining command parts into a single Docker command string."
@@ -423,8 +244,11 @@ catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
 
+# Clears all existing text and resets the console display
+Clear-Host
+
 # Construct the full request URL by trimming any trailing slash from $HubUri and appending the endpoint path.
-$requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
+$requestUri = "$($HubUri.Trim().TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
 
 # Build the complete path to the bot's information directories
 $botDirectory           = Join-Path $BotVolume $BotName
@@ -434,100 +258,106 @@ $errorsDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "error
 $outputDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
 $botId                  = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
 
-Clear-Host
+# Initialize the bot job with its ID, name, type, container and host ports, and hub URI.
+# This job sets up the bot’s execution context and prepares it to start processing.
+$botJob = Initialize-Bot `
+    -BotId         $botId `
+    -BotName       $BotName `
+    -BotType       $botType `
+    -ContainerPort $ListenerPort `
+    -HubUri        $HubUri `
+    -HostPort      $ListenerPort
+    
+# Start the bot watchdog process to monitor the bot's status and health.
+# The watchdog will run in the background and will be responsible for restarting the bot if it stops unexpectedly.
+Start-WatchDog `
+    -BotId         $botId `
+    -BotName       $BotName `
+    -BotType       $botType `
+    -ContainerPort $ListenerPort `
+    -HubUri        $HubUri `
+    -HostPort      $ListenerPort
+
 Write-Host
 Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script.$([System.Environment]::NewLine)"
 
-# Detect Unix-based platforms
-$monitorFilePath = Join-Path "bot-monitor" "g4-bot-monitor-windows.exe"
-if([Environment]::OSVersion.Platform -eq [System.PlatformID]::Unix) {
-    $monitorFilePath = Join-Path "bot-monitor" "g4-bot-monitor-windows"
-}
-
-$hostPort   = Get-FreePort
-$botRoute   = "/bot/v1"
-$botUri     = "http://localhost:$($HostPort)$($botRoute)/$($BotName)"
-$monitorUri = "http://localhost:$($HostPort)$($botRoute)/$($BotName)/monitor/$($botId)"
-
-Write-Host "Free TCP port found: $($hostPort)"
-
-# Invoke the Start-Monitor function with all required parameters
-Start-Monitor `
-    -MonitorFilePath (Join-Path $PSScriptRoot $monitorFilePath) `
-    -HubUri          $HubUri `
-    -BotUri          $botUri `
-    -BotName         $BotName `
-    -BotType         "Static Bot" `
-    -BotId           $botId
-
-while ($true) {
-    try {
-        # Verify if the 'automation.json' file exists in the bot automation directory.
-        if (-Not (Test-Path $botFilePath)) {
-            Write-Host "File 'automation.json' not found in '$botAutomationDirectory'. Waiting for next interval."
-            Wait-Interval -Message "Next check scheduled at:" -IntervalTime $IntervalTime
-            
-            # Skip the current iteration and continue looping.
-            continue
-        }
-
-        # Generate a unique timestamp to identify this session (used for naming files).
-        $session = (Get-Date).ToString("yyyyMMddHHmmssfff")
-        
-        # Construct the output file path using the session timestamp.
-        $outputFilePath = [System.IO.Path]::Combine($outputDirectory, "$($BotName)-$($session).json")
-        
-        # Construct the error log file path within the 'errors' directory using the session timestamp.
-        $errorsPath = Join-Path $errorsDirectory "$($BotName)-$($session).json"
-        
-        # Read the entire content of 'automation.json' as raw text.
-        $botFileContent = [System.IO.File]::ReadAllText($botFilePath, [System.Text.Encoding]::UTF8)
-
-        # Parse the JSON text into an object for modification.
-        $botFileJson = ConvertFrom-Json $botFileContent
-
-        # Update the 'driverBinaries' property within the 'driverParameters' object.
-        $botFileJson.driverParameters.driverBinaries = $DriverBinaries
-
-        # Update the 'token' property within the 'authentication' object.
-        $botFileJson.authentication.token = $Token
-
-        # Re-serialize the updated JSON object back to text, ensuring sufficient depth.
-        $botFileContent = ConvertTo-Json $botFileJson -Depth 50
-
-        # Convert the JSON text to a byte array and encode it in Base64.
-        $botBytes = [System.Text.Encoding]::UTF8.GetBytes($botFileContent)
-        $botContent = [System.Convert]::ToBase64String($botBytes)
-
-        # Update the bot status to 'Working'
-        Update-BotStatus -BotId $botId -MonitorUri $monitorUri -Status "Working"
-
-        # Send the Base64-encoded JSON to the remote endpoint using a POST request.
-        Write-Host
-        Write-Host "Sending Base64-encoded 'automation.json' to remote endpoint"
-        $response = Invoke-RestMethod -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
-    }
-    catch {
-        # If an error occurs, display a message and log the error details to the designated errors file.
-        $baseException = $_.Exception.GetBaseException()
-        Write-Error "An error occurred '$($baseException.Message)'.$([System.Environment]::NewLine)Check $errorsPath for details."
-        @{ error = $baseException.StackTrace; message = $baseException.Message } | ConvertTo-Json -Compress | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
-    }
-    finally {
-        # Update the bot status to 'Ready'
-        Update-BotStatus -BotId $botId -MonitorUri $monitorUri -Status "Ready"
-
+try {
+    while ($botJob.State -eq 'Running') {
         try {
-            if($null -ne $outputFilePath -and $response) {
-                $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
-                Write-Verbose "Response successfully saved to: $outputFilePath"
+            # Verify if the 'automation.json' file exists in the bot automation directory.
+            if (-Not (Test-Path $botFilePath)) {
+                Write-Host "File 'automation.json' not found in '$botAutomationDirectory'. Waiting for next interval."
+                Wait-Interval -Message "Next check scheduled at:" -IntervalTime $IntervalTime
+            
+                # Skip the current iteration and continue looping.
+                continue
             }
+
+            # Generate a unique timestamp to identify this session (used for naming files).
+            $session = (Get-Date).ToString("yyyyMMddHHmmssfff")
+        
+            # Construct the output file path using the session timestamp.
+            $outputFilePath = [System.IO.Path]::Combine($outputDirectory, "$($BotName)-$($session).json")
+        
+            # Construct the error log file path within the 'errors' directory using the session timestamp.
+            $errorsPath = Join-Path $errorsDirectory "$($BotName)-$($session).json"
+        
+            # Read the entire content of 'automation.json' as raw text.
+            $botFileContent = [System.IO.File]::ReadAllText($botFilePath, [System.Text.Encoding]::UTF8)
+
+            # Parse the JSON text into an object for modification.
+            $botFileJson = ConvertFrom-Json $botFileContent
+
+            # Update the 'driverBinaries' property within the 'driverParameters' object.
+            $botFileJson.driverParameters.driverBinaries = $DriverBinaries
+
+            # Update the 'token' property within the 'authentication' object.
+            $botFileJson.authentication.token = $Token
+
+            # Re-serialize the updated JSON object back to text, ensuring sufficient depth.
+            $botFileContent = ConvertTo-Json $botFileJson -Depth 50
+
+            # Convert the JSON text to a byte array and encode it in Base64.
+            $botBytes = [System.Text.Encoding]::UTF8.GetBytes($botFileContent)
+            $botContent = [System.Convert]::ToBase64String($botBytes)
+
+            # Update the bot status to 'Working'
+            Update-BotStatus -BotId $botId -HubUri $HubUri  -Status "Working"
+
+            # Send the Base64-encoded JSON to the remote endpoint using a POST request.
+            Write-Host
+            Write-Host "Sending Base64-encoded 'automation.json' to remote endpoint"
+            $response = Invoke-RestMethod -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
         }
         catch {
-            Write-Error "Failed to save response to: $outputFilePath. Error details: $($_.Exception.GetBaseException().Message)"
+            # If an error occurs, display a message and log the error details to the designated errors file.
+            $baseException = $_.Exception.GetBaseException()
+            Write-Error "An error occurred '$($baseException.Message)'.$([System.Environment]::NewLine)Check $errorsPath for details."
+            @{ error = $baseException.StackTrace; message = $baseException.Message } | ConvertTo-Json -Compress | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
         }
-    }
+        finally {
+            # Update the bot status to 'Ready'
+            Update-BotStatus -BotId $botId -HubUri $HubUri -Status "Ready"
 
-    # Wait for the specified interval before starting the next iteration.
-    Wait-Interval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
+            try {
+                if($null -ne $outputFilePath -and $response) {
+                    $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
+                    Write-Verbose "Response successfully saved to: $outputFilePath"
+                }
+            }
+            catch {
+                Write-Error "Failed to save response to: $outputFilePath. Error details: $($_.Exception.GetBaseException().Message)"
+            }
+        }
+
+        # Wait for the specified interval before starting the next iteration.
+        Wait-Interval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
+    }
+}
+catch {
+    Write-Error "Exception:" $_.Exception.GetBaseException().Message
+}
+finally {
+    # Cleanup, removing all running job
+    Remove-Jobs
 }

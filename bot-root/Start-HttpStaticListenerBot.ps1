@@ -62,7 +62,7 @@ param (
     [CmdletBinding()]
     [Parameter(Mandatory = $true)] [string]$BotVolume,
     [Parameter(Mandatory = $true)] [string]$BotName,
-    [Parameter(Mandatory = $false)][int]   $HostPort              = 8080,
+    [Parameter(Mandatory = $false)][int]   $HostPort,
     [Parameter(Mandatory = $false)][string]$ContentType           = "application/json; charset=utf-8",
     [Parameter(Mandatory = $true)] [string]$DriverBinaries,
     [Parameter(Mandatory = $true)] [string]$HubUri,
@@ -70,6 +70,28 @@ param (
     [Parameter(Mandatory = $true)] [string]$Token,
     [Parameter(Mandatory = $false)][switch]$Docker
 )
+
+# Called on any PowerShell exit: normal return, exception, SIGTERM, CTRL+C, etc.
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Remove-Jobs } | Out-Null
+
+# Change the current directory to the scriptï¿½s folder, ensuring relative paths resolve correctly
+Set-Location -Path $PSScriptRoot
+
+# Import the BotMonitor module from the ï¿½modulesï¿½ subfolder of the script root
+# Using [System.IO.Path]::Combine ensures cross-platform path correctness
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotMonitor.psm1')) -Force
+
+# Configure all cmdlets to automatically show Information-stream messages by default
+# This makes Write-Information calls visible without needing -InformationAction on each call
+$PSDefaultParameterValues['*:InformationAction'] = 'Continue'
+
+# Find and assign a free TCP port on the Docker host for publishing
+if(-not $HostPort) {
+    $HostPort = Get-FreePort
+}
+
+# Defines the type of bot instance for logging, metrics, and routing logic
+$botType = "static-http-bot"
 
 function Invoke-G4Bot {
     <#
@@ -312,7 +334,7 @@ if ($Docker) {
         Write-Verbose "Launching Docker container with: Port mapping '$($HostPort):8080', Volume mapping '$($BotVolume):/bots'."
         Write-Verbose "Building the Docker command from the specified parameters."
         $cmdLines = @(
-            "run -d -p `"$($HostPort):8080`" -v `"$($BotVolume):/bots`"",
+            "run -d -p `"$($HostPort):$($HostPort)`" -v `"$($BotVolume):/bots`"",
             " -e BOT_NAME=`"$($BotName)`"",
             " -e BOT_PORT=`"$($HostPort)`"",
             " -e CONTENT_TYPE=`"$($ContentType)`"",
@@ -347,6 +369,32 @@ catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException())"
 }
 
+# Build the complete path to the bot's information directories
+$botId = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+
+# Initialize the bot job with its ID, name, type, container and host ports, and hub URI.
+# This job sets up the bot’s execution context and prepares it to start processing.
+$botJob = Initialize-Bot `
+    -BotId         $botId `
+    -BotName       $BotName `
+    -BotType       $botType `
+    -ContainerPort $HostPort `
+    -HubUri        $HubUri `
+    -HostPort      $HostPort
+    
+# Start the bot watchdog process to monitor the bot's status and health.
+# The watchdog will run in the background and will be responsible for restarting the bot if it stops unexpectedly.
+Start-WatchDog `
+    -BotId         $botId `
+    -BotName       $BotName `
+    -BotType       $botType `
+    -ContainerPort $HostPort `
+    -HubUri        $HubUri `
+    -HostPort      $HostPort
+
+Write-Host
+Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script.$([System.Environment]::NewLine)"
+
 Write-Verbose "Creating HttpListener object"
 $listener = New-Object System.Net.HttpListener
 
@@ -361,7 +409,7 @@ try {
     Write-Host "Listening on $($botEndpoint)/"
     Write-Host "Server is running.$([System.Environment]::NewLine)Press CTRL+C to stop the server.$([System.Environment]::NewLine)Note: The server will stop after receiving the next HTTP request"
 
-    while ($true) {
+    while ($botJob.State -eq 'Running') {
         try {
             Write-Verbose "Waiting for incoming HTTP request..."
             $context  = $listener.GetContext()
@@ -407,6 +455,9 @@ try {
                 Write-Verbose "Detected query string parameters. These parameters will be ignored by the listener"
             }
 
+            # Update the bot status to 'Working'
+            Update-BotStatus -BotId $botId -HubUri $HubUri  -Status "Working"
+
             Write-Verbose "Invoking G4Bot with updated configuration"
             $botResponse = Invoke-G4Bot `
                 -BotVolume      $BotVolume `
@@ -449,6 +500,10 @@ try {
 
             continue
         }
+        finally {
+            # Update the bot status to 'Ready'
+            Update-BotStatus -BotId $botId -HubUri $HubUri -Status "Ready"
+        }
     }
 }
 catch [System.Net.HttpListenerException] {
@@ -461,4 +516,7 @@ finally {
     Write-Verbose "Stopping and closing the HttpListener"
     $listener.Stop()
     $listener.Close()
+    
+    # Cleanup, removing all running job
+    Remove-Jobs
 }

@@ -1685,6 +1685,22 @@ function Start-PartitionCleanupBotWizard {
             Type             = "String"
         },
         [ordered]@{
+            Default          = 86400
+            Description      = "The time interval (in seconds) between cleanup cycles."
+            EnvironmentValue = $env:CLEANUP_BOT_INTERVAL_TIME
+            Mandatory        = $true
+            Name             = "IntervalTime"
+            Type             = "Number"
+        },
+        [ordered]@{
+            Default          = "http://localhost:9944"
+            Description      = "The base URI of the G4 Hub endpoint to which automation configurations are sent."
+            EnvironmentValue = $env:G4_HUB_URI
+            Mandatory        = $true
+            Name             = "HubUri"
+            Type             = "String"
+        },
+        [ordered]@{
             Default          = 3
             Description      = "The number of newest files to retain per target folder."
             EnvironmentValue = $env:CLEANUP_BOT_NUNBER_OF_FILES
@@ -1693,11 +1709,11 @@ function Start-PartitionCleanupBotWizard {
             Type             = "Number"
         },
         [ordered]@{
-            Default          = 86400
-            Description      = "The time interval (in seconds) between cleanup cycles."
-            EnvironmentValue = $env:CLEANUP_BOT_INTERVAL_TIME
+            Default          = 8085
+            Description      = "The port used by the background job's HTTP listener to receive incoming requests."
+            EnvironmentValue = $env:G4_LISTENER_PORT
             Mandatory        = $true
-            Name             = "IntervalTime"
+            Name             = "ListenerPort"
             Type             = "Number"
         },
         [ordered]@{
@@ -1789,6 +1805,14 @@ function Start-StaticBotWizard {
             EnvironmentValue = $env:STATIC_BOT_INTERVAL_TIME
             Mandatory        = $true
             Name             = "IntervalTime"
+            Type             = "Number"
+        },
+        [ordered]@{
+            Default          = 8085
+            Description      = "The port used by the background job's HTTP listener to receive incoming requests."
+            EnvironmentValue = $env:G4_LISTENER_PORT
+            Mandatory        = $true
+            Name             = "ListenerPort"
             Type             = "Number"
         },
         [ordered]@{

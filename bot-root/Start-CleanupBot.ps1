@@ -34,17 +34,42 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$BotVolume,
 
+    [ValidateRange(5, [int]::MaxValue)]
+    [Parameter(Mandatory=$true)]
+    [int]$IntervalTime,
+
+    [Parameter(Mandatory = $true)]
+    [string]$HubUri,
+
+    [Parameter(Mandatory = $false)]
+    [int]$ListenerPort,
+
     [ValidateRange(1, [int]::MaxValue)]
     [Parameter(Mandatory=$true)]
     [int]$NumberOfFilesToRetain,
 
-    [ValidateRange(1, [int]::MaxValue)]
-    [Parameter(Mandatory=$true)]
-    [int]$IntervalTime,
-
     [Parameter(Mandatory = $false)]
     [switch]$Docker
 )
+
+# Change the current directory to the scriptï¿½s folder, ensuring relative paths resolve correctly
+Set-Location -Path $PSScriptRoot
+
+# Import the BotMonitor module from the ï¿½modulesï¿½ subfolder of the script root
+# Using [System.IO.Path]::Combine ensures cross-platform path correctness
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotMonitor.psm1')) -Force
+
+# Configure all cmdlets to automatically show Information-stream messages by default
+# This makes Write-Information calls visible without needing -InformationAction on each call
+$PSDefaultParameterValues['*:InformationAction'] = 'Continue'
+
+# Find and assign a free TCP port on the Docker host for publishing
+if(-not $ListenerPort) {
+    $ListenerPort = Get-FreePort
+}
+
+# Defines the type of bot instance for logging, metrics, and routing logic
+$botType = "partition-cleanup"
 
 function Import-EnvironmentVariablesFile {
     <#
@@ -162,7 +187,9 @@ if ($Docker) {
             "run -d -v `"$($BotVolume):/bots`"",
             " -e CLEANUP_BOT_NUNBER_OF_FILES=$($NumberOfFilesToRetain)",
             " -e CLEANUP_BOT_INTERVAL_TIME=$($IntervalTime)",
-            " --name `"$($botName)-$([guid]::NewGuid())`" g4-partition-cleanup-bot:latest"
+            " -e HUB_URI=`"$($HubUri)`"",
+            " -e LISTENER_PORT=$($ListenerPort)",
+            " -p $($ListenerPort):$($ListenerPort) --name `"$($botName)-$([guid]::NewGuid())`" g4-partition-cleanup-bot:latest"
         )
         
         Write-Verbose "Joining command parts into a single Docker command string."
@@ -189,12 +216,40 @@ catch {
     Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
 }
 
+# Build the complete path to the bot's information directories
+$botId = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+
+# Initialize the bot job with its ID, name, type, container and host ports, and hub URI.
+# This job sets up the bot’s execution context and prepares it to start processing.
+$botJob = Initialize-Bot `
+    -BotId         $botId `
+    -BotName       'cleanup-bot' `
+    -BotType       $botType `
+    -ContainerPort $ListenerPort `
+    -HubUri        $HubUri `
+    -HostPort      $ListenerPort
+    
+# Start the bot watchdog process to monitor the bot's status and health.
+# The watchdog will run in the background and will be responsible for restarting the bot if it stops unexpectedly.
+Start-WatchDog `
+    -BotId         $botId `
+    -BotName       'cleanup-bot' `
+    -BotType       $botType `
+    -ContainerPort $ListenerPort `
+    -HubUri        $HubUri `
+    -HostPort      $ListenerPort
+
+Write-Host
+Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script.$([System.Environment]::NewLine)"
 Write-Verbose "Starting cleanup process on BotVolume: $($BotVolume)"
 Write-Verbose "Will retain the newest $($NumberOfFilesToRetain) files per target folder."
 
-while ($true) {
+while ($botJob.State -eq 'Running') {
     # Process target directories (archive, output, errors)
     try {
+        # Update the bot status to 'Working'
+        Update-BotStatus -BotId $botId -HubUri $HubUri  -Status "Working"
+
         Write-Verbose "Verifying the existence of the BotVolume at path '$($BotVolume)'"
         if (-not (Test-Path -Path $BotVolume)) {
             Clear-Host

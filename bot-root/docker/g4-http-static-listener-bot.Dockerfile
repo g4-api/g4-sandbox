@@ -2,7 +2,7 @@
 FROM ubuntu:24.04
 
 # Expose the internal port which will be used by the listener
-EXPOSE 8080
+EXPOSE 8085
 
 # Prevent interactive dialogs during package install
 ENV DEBIAN_FRONTEND=noninteractive
@@ -43,6 +43,7 @@ WORKDIR /app
 # Copy the PowerShell script and .env file into the container
 COPY .env /app/.env
 COPY Start-HttpStaticListenerBot.ps1 /app/Start-HttpStaticListenerBot.ps1
+COPY modules /app/modules/
 
 # Make script executable (optional good practice)
 RUN chmod +x /app/Start-HttpStaticListenerBot.ps1
