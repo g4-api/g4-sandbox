@@ -4,7 +4,7 @@ WORK ITEMS:
 #>
 param (
     [CmdletBinding()]
-    [Parameter(Mandatory = $false)] [string] $BotId,
+    [Parameter(Mandatory = $false)] [string] $BotId="$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())",
     [Parameter(Mandatory = $true)]  [string] $BotName,
     [Parameter(Mandatory = $true)]  [string] $BotVolume,
     [Parameter(Mandatory = $false)] [string] $CallbackIngress,
@@ -49,6 +49,7 @@ if ($Docker) {
         # Initialize an array of docker run arguments
         $cmdLines = @(
             "run -d -v `"$($botConfiguration.Directories.BotVolume):/bots`""
+            " -e BOT_ID=`"$($botConfiguration.Metadata.BotId)`""
             " -e BOT_NAME=`"$($botConfiguration.Metadata.BotName)`""
             " -e CALLBACK_INGRESS=`"$($botConfiguration.Endpoints.BotCallbackIngress)`""
             " -e CALLBACK_URI=`"$($botConfiguration.Endpoints.BotCallbackUri)`""
@@ -89,7 +90,7 @@ $bot = Initialize-BotByConfiguration -BotConfiguration $botConfiguration
 
 # Display startup message and instructions
 Write-Host
-Write-Host "Starting main bot loop.`nPress [Ctrl] + [C] to stop the script.`n"
+Write-Host "Starting main bot loop.`nPress [Ctrl] + [C] to stop bot.`n"
 
 # Loop until the callback listener runspace completes
 while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runner.InvocationStateInfo.State -eq 'Running') {

@@ -295,10 +295,12 @@ function New-BotConfiguration {
         }
 
         Directories = [PSCustomObject]@{
+            BotArchiveDirectory     = [System.IO.Path]::Combine($BotVolume, $BotName, "archive")
             BotAutomationDirectory  = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot')
             BotAutomationFile       = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot', 'automation.json')
-            BotDirectory            = Join-Path $BotVolume $BotName
+            BotDirectory            = [System.IO.Path]::Combine($BotVolume, $BotName)
             BotErrorsDirectory      = [System.IO.Path]::Combine($BotVolume, $BotName, "errors")
+            BotInputDirectory       = [System.IO.Path]::Combine($BotVolume, $BotName, "input")
             BotOutputDirectory      = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
             BotExtractionsDirectory = [System.IO.Path]::Combine($BotVolume, $BotName, "extractions")
             BotVolume               = $BotVolume
@@ -338,6 +340,166 @@ function Get-FreePort {
 
     # Invoke the predefined $getFreePort script-block to retrieve an available TCP port
     return & $getFreePort
+}
+
+<#
+.SYNOPSIS
+    Gets the next file from an input directory, processes it into JSON, and returns a result object.
+
+.DESCRIPTION
+    Scans the specified InputDirectory for files matching the given extensions, selects the most recently modified one,
+    converts or validates its content into a compact JSON array, and returns a PSCustomObject containing StatusCode,
+    Content, and Reason. Finally, moves the processed file to ArchiveDirectory with the Session ID appended to its name.
+
+.PARAMETER InputDirectory
+    The path to the folder containing the files to process.
+
+.PARAMETER ArchiveDirectory
+    The path to the folder where processed files will be archived.
+
+.PARAMETER Session
+    A unique session identifier appended to archived filenames to avoid collisions.
+
+.PARAMETER Extensions
+    An array of file extensions (without the leading dot) to include, e.g. 'csv','json'.  
+    Default is '*' which means any file extension.
+
+.OUTPUTS
+    PSCustomObject with properties:
+    - StatusCode (int): 200 on success, 404 if no file found, 500 on error.
+    - Content (string|null): The minified JSON content or $null.
+    - Reason (string): Description of outcome or error message.
+
+.EXAMPLE
+    # Process only CSV and JSON files:
+    Get-NextFile -InputDirectory 'C:\in' -ArchiveDirectory 'C:\archive' -Session 'ABC123' -Extensions csv,json
+
+.EXAMPLE
+    # Process any file type:
+    Get-NextFile -InputDirectory 'C:\in' -ArchiveDirectory 'C:\archive' -Session 'ABC123'
+#>
+function Get-NextFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InputDirectory,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ArchiveDirectory,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Session,
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$Extensions = @('*')
+    )
+
+    # Initialize variables for result and the reference to the latest file found
+    $resultObject = $null
+    $latestFile   = $null
+
+    try {
+        # Retrieve all files from the input directory
+        $items = Get-ChildItem -Path $InputDirectory -File
+
+        # If Extensions is not '*' then filter by those extensions (trim leading dot for comparison)
+        if (-not ($Extensions -contains '*')) {
+            $files = $items | Where-Object {
+                $ext = $_.Extension.TrimStart('.')
+                $Extensions -contains $ext
+            }
+        }
+        else {
+            $files = $items
+        }
+
+        # If no file is found, return a result object with a 404 status
+        if (-not $files) {
+            if (-not ($Extensions -contains '*')) {
+                $extList = $Extensions -join ', '
+                $reason  = "No files with extensions [$($extList)] found in input folder: $($InputDirectory)"
+            }
+            else {
+                $reason = "No files found in input folder: $($InputDirectory)"
+            }
+
+            return [PSCustomObject]@{
+                StatusCode = 404
+                Content    = $null
+                Reason     = $reason
+            }
+        }
+
+        # Select the most recently modified file
+        $latestFile = $files | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+        # Process based on the file extension
+        if ($latestFile.Extension -eq ".csv") {
+            # Import CSV and convert to a compact JSON string
+            $csvData     = Import-Csv -Path $latestFile.FullName -Encoding UTF8
+            $jsonContent = $csvData | ConvertTo-Json -Depth 3 -Compress
+        }
+        elseif ($latestFile.Extension -eq ".json") {
+            # Read raw JSON text from the file
+            $rawJson = [System.IO.File]::ReadAllText($latestFile.FullName, [System.Text.Encoding]::UTF8)
+
+            # Validate JSON by parsing; throw if invalid
+            try {
+                $jsonObject = $rawJson | ConvertFrom-Json
+            }
+            catch {
+                throw "File $($latestFile.FullName) is not a valid JSON file."
+            }
+
+            # Re-serialize to a compact JSON string
+            $jsonContent = $jsonObject | ConvertTo-Json -Depth 10 -Compress
+        }
+        else {
+            throw "Unsupported file type: $($latestFile.Extension)"
+        }
+
+        # Ensure the JSON string is an array; wrap if needed
+        if ($jsonContent[0] -ne '[' -or $jsonContent[-1] -ne ']') {
+            $jsonContent = "[$($jsonContent)]"
+        }
+
+        # Build a success result object
+        $resultObject = [PSCustomObject]@{
+            StatusCode = 200
+            Content    = $jsonContent
+            Reason     = "File processed successfully: $($latestFile.Name)"
+        }
+    }
+    catch {
+        # On error, return a 500 result with the error message
+        $resultObject = [PSCustomObject]@{
+            StatusCode = 500
+            Content    = $null
+            Reason     = $_.Exception.GetBaseException().Message
+        }
+    }
+    finally {
+        # If a file was processed, attempt to archive it
+        if ($latestFile -and (Test-Path -Path $latestFile.FullName)) {
+            try {
+                # Construct a unique archive filename using the session ID
+                $baseName        = [System.IO.Path]::GetFileNameWithoutExtension($latestFile.Name)
+                $extension       = [System.IO.Path]::GetExtension($latestFile.Name)
+                $archiveFileName = "$($baseName)-$($Session)$($extension)"
+                $archiveFilePath = Join-Path $ArchiveDirectory $archiveFileName
+
+                # Move the file into the archive directory
+                Move-Item -Path $latestFile.FullName -Destination $archiveFilePath -Force
+            }
+            catch {
+                # If archiving fails, append the error to the result's Reason
+                $archiveError = "Failed to archive file: $($_.Exception.GetBaseException().Message)"
+                $resultObject.Reason += " | $archiveError"
+            }
+        }
+    }
+
+    return $resultObject
 }
 
 <#
@@ -685,6 +847,7 @@ function Wait-Interval {
 
 Export-ModuleMember -Function Get-FreePort
 Export-ModuleMember -Function Get-RemoteIPv4
+Export-ModuleMember -Function Get-NextFile
 Export-ModuleMember -Function Import-EnvironmentVariablesFile
 Export-ModuleMember -Function Join-Uri
 Export-ModuleMember -Function New-BotConfiguration

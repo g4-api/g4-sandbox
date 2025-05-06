@@ -12,7 +12,7 @@ ENV TERM=xterm
 
 # Install prerequisites
 RUN apt-get update && \
-    apt-get install -y wget apt-transport-https software-properties-common gnupg && \
+    apt-get install -y wget apt-transport-https software-properties-common gnupgc curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and install Microsoft repository GPG keys
@@ -26,7 +26,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Echo the variables in the desired format during build
-RUN echo "BOT_NAME: ${BOT_NAME}" && \
+RUN echo "BOT_ID: ${BOT_ID}" && \
+    echo "BOT_NAME: ${BOT_NAME}" && \
     echo "CALLBACK_INGRESS: ${CALLBACK_INGRESS}" && \
     echo "CALLBACK_URI: ${CALLBACK_URI}" && \
     echo "DRIVER_BINARIES: ${DRIVER_BINARIES}" && \
@@ -50,8 +51,9 @@ RUN chmod +x /app/Start-StaticBot.ps1
 
 SHELL ["/bin/sh", "-c"]
 ENTRYPOINT pwsh -NoLogo -File ./Start-StaticBot.ps1 \
+  -BotId           "$BOT_ID" \
+  -BotName         "$BOT_NAME" \  
   -BotVolume       "/bots" \
-  -BotName         "$BOT_NAME" \
   -CallbackIngress "$CALLBACK_INGRESS" \
   -CallbackUri     "$CALLBACK_URI" \
   -DriverBinaries  "$DRIVER_BINARIES" \

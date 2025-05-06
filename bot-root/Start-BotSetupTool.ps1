@@ -12,14 +12,6 @@ $botConfiguration = New-BotConfiguration -EnvironmentFilePath (Join-Path $PSScri
 
 $commonParameters = @(
     [ordered]@{
-        Default          = $botConfiguration.Metadata.BotId
-        Description      = "Unique identifier for this bot instance; used to generate distinct HTTP listener prefixes and callback endpoint URLs."
-        EnvironmentValue = $botConfiguration.Metadata.BotId
-        Mandatory        = $true
-        Name             = "BotId"
-        Type             = "String"
-    },
-    [ordered]@{
         Default          = ""
         Description      = "The root directory where the bot will operate."
         EnvironmentValue = $botConfiguration.Directories.BotVolume
@@ -1312,41 +1304,10 @@ function Start-FileListenerBotWizard {
         $Script
     )
 
-    # Define wizard parameters as an array of ordered hashtables. Each ordered hashtable ensures that
-    # the keys (Default, Description, Mandatory, Name) appear in a consistent order.
+    # Define wizard parameters as an array of ordered hashtables.
+    # Each ordered hashtable ensures that the keys appear in the specified order:
+    # Default, Description, Mandatory, and Name.
     $wizardParameters = @(
-        [ordered]@{
-            Default          = ""
-            Description      = "The root directory where the bot will operate."
-            EnvironmentValue = $env:BOT_VOLUME
-            Mandatory        = $true
-            Name             = "BotVolume"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "g4-file-listener-bot"
-            Description      = "The name of the bot, used for identification and folder naming."
-            EnvironmentValue = $env:FILE_LISTENER_BOT_NAME
-            Mandatory        = $true
-            Name             = "BotName"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "http://localhost:4444/wd/hub"
-            Description      = "The directory containing the driver binaries or the grid endpoint for drivers."
-            EnvironmentValue = $env:DRIVER_BINARIES
-            Mandatory        = $true
-            Name             = "DriverBinaries"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = ""
-            Description      = "The base URI of the G4 Hub endpoint to which automation configurations are sent."
-            EnvironmentValue = $env:G4_HUB_URI
-            Mandatory        = $true
-            Name             = "HubUri"
-            Type             = "String"
-        },
         [ordered]@{
             Default          = 10
             Description      = "The polling interval (in seconds) between each file check."
@@ -1354,32 +1315,8 @@ function Start-FileListenerBotWizard {
             Mandatory        = $true
             Name             = "IntervalTime"
             Type             = "Number"
-        },
-        [ordered]@{
-            Default          = ""
-            Description      = "The authentication token (G4 license token) required for accessing the G4 Hub."
-            EnvironmentValue = $env:G4_LICENSE_TOKEN
-            Mandatory        = $true
-            Name             = "Token"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = $false
-            Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
-            EnvironmentValue = ""
-            Mandatory        = $false
-            Name             = "Docker"
-            Type             = "Switch"
-        },
-        [ordered]@{
-            Default          = "Normal"
-            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
-            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
-            Mandatory        = $false
-            Name             = "WindowStyle"
-            Type             = "String"
         }
-    )
+    ) + $commonParameters
 
     # Invoke the wizard to launch the File Listener Bot.
     Show-Wizard `
