@@ -31,7 +31,7 @@ $getRemoteIpv4 = {
         $_.NetworkInterfaceType -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Tunnel
     } |
     ForEach-Object {
-        # Expand each adapter’s unicast addresses
+        # Expand each adapter's unicast addresses
         $_.GetIPProperties().UnicastAddresses
     } |
     Where-Object {
@@ -50,10 +50,11 @@ $getRemoteIpv4 = {
 }
 
 # Scriptblock to import key/value pairs from a file (plus any additional entries),
-# skip specified names, and set them as environment variables in the current session.
+# skip specified names, and set them as environment variables in the current session,
+# but only if they aren't already set.
 $importEnvironment = {
     param(
-        $EnvironmentFilePath,            # Path to the UTF-8–encoded environment file
+        $EnvironmentFilePath,            # Path to the UTF-8-encoded environment file
         $SkipNames,                      # Array of variable names to exclude from import
         $AdditionalEnvironmentVariables  # Array of extra "KEY=VALUE" strings to append
     )
@@ -89,6 +90,12 @@ $importEnvironment = {
         if ($SkipNames -contains $key) {
             return
         }
+
+        # If this variable is already set in this session (non-empty), skip it
+        if (-not [string]::IsNullOrEmpty("$($env):$($key)")) {
+            Write-Debug "Environment variable '$key' already set to '$($env):$($key)', skipping"
+            return
+        }
         
         # Set the environment variable in this session
         Set-Item -Path "Env:$key" -Value $value
@@ -111,55 +118,161 @@ $joinUri = {
     return "$($normalizedBase)/$($normalizedPath)"
 }
 
+# Checks if a specific TCP port is free on the local loopback interface
+$testPort = {
+    param(
+        [int]$PortToTest
+    )
+
+    # Retrieve all active TCP listeners on the machine (all interfaces)
+    $listeners = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+
+    # If any listener's Port equals our target, it's in use
+    if ($listeners.Port -contains $PortToTest) {
+        return $false
+    }
+
+    # Port is free
+    return $true
+}
+
 function New-BotConfiguration {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)] [string]$BotName,
-        [Parameter(Mandatory = $true)] [string]$BotType,
-        [Parameter(Mandatory = $true)] [string]$BotVolume,
-        [Parameter(Mandatory = $false)][int]   $CallbackPort,
-        [Parameter(Mandatory = $false)][string]$DriverBinaries,
-        [Parameter(Mandatory = $false)][int]   $EntryPointPort,
-        [Parameter(Mandatory = $true)] [string]$EnvironmentFilePath,
-        [Parameter(Mandatory = $true)] [string]$HubUri,
-        [Parameter(Mandatory = $false)][int]   $RegistrationTimeout,
-        [Parameter(Mandatory = $false)][string]$Token,
-        [Parameter(Mandatory = $false)][int]   $WatchDogPollingInterval
+        [Parameter(Mandatory = $false)] [string] $BotId,
+        [Parameter(Mandatory = $false)] [string] $BotName,
+        [Parameter(Mandatory = $false)] [string] $BotType,
+        [Parameter(Mandatory = $false)] [string] $BotVolume,
+        [Parameter(Mandatory = $false)] [string] $CallbackUri,
+        [Parameter(Mandatory = $false)] [string] $CallbackIngress,
+        [Parameter(Mandatory = $false)] [string] $DriverBinaries,
+        [Parameter(Mandatory = $false)] [int]    $EntryPointPort,
+        [Parameter(Mandatory = $true)]  [string] $EnvironmentFilePath,
+        [Parameter(Mandatory = $false)] [string] $HubUri,
+        [Parameter(Mandatory = $false)] [int]    $RegistrationTimeout,
+        [Parameter(Mandatory = $false)] [string] $Token,
+        [Parameter(Mandatory = $false)] [int]    $WatchDogPollingInterval
     )
 
-    & $importEnvironment -EnvironmentFilePath $EnvironmentFilePath -SkipNames @() -AdditionalEnvironmentVariables @()
+    # Scriptblock to converts a string to an integer, returning a default if parsing fails.
+    $convertToNumber = {
+        param(
+            [string]$Number,       # The input string to convert
+            [int]   $DefaultValue  # Value to return when parsing fails
+        )
 
-    $botId = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
-    $ipv4  = & $getRemoteIpv4
-
-    if(-not $EntryPointPort) {
-        $EntryPointPort = & $getFreePort
-    }
-
-    if(-not $CallbackPort -or $CallbackPort -le 0) {
-        $CallbackPort = & $getFreePort
-    }
-
-    if(-not $RegistrationTimeout){
+        # Prepare an integer variable to receive the parsed value
         $value = 0
 
-        $isNumber = [int]::TryParse($env:G4_REGISTRATION_TIMEOUT, [ref]$value)
+        # Attempt to parse the string into an integer; $isNumber is $true on success
+        $isNumber = [int]::TryParse($Number, [ref]$value)
 
-        if($isNumber) { $RegistrationTimeout = $value } else { $RegistrationTimeout = 60 }
+        if ($isNumber) {
+            # If parsing succeeded, return the parsed integer
+            return $value
+        }
+
+        # If parsing failed, return the provided default value
+        return $DefaultValue
     }
 
-    if(-not $WatchDogPollingInterval){
-        $value = 0
+    # Scriptblock to constructs a bot monitor endpoint URL from a base callback URI and bot identifier.
+    $formatCallback = {
+        param(
+            [Uri]   $CallbackUri,  # The base URI to format (e.g. "https://example.com")
+            [string]$BotId         # The unique bot identifier to append to the path
+        )
 
-        $isNumber = [int]::TryParse($env:G4_WATCHDOG_INTERVAL, [ref]$value)
+        # Return null if no URI was provided
+        if (-not $CallbackUri) {
+            return $null
+        }
 
-        if($isNumber) { $WatchDogPollingInterval = $value } else { $WatchDogPollingInterval = 60 }
+        # Validate that the provided value is a valid URI object
+        try {
+            $uri = [Uri]::new($CallbackUri)
+        }
+        catch {
+            # If URI construction fails, treat as invalid
+            return $null
+        }
+
+        # Get the URI scheme (http or https)
+        $scheme = $CallbackUri.Scheme
+
+        # Get the hostname (without port)
+        $host = $CallbackUri.Host
+
+        # Determine port: if the original URI's port is non-positive, fetch a free one; otherwise use it
+        $port = if (-not $CallbackUri.Port -or $CallbackUri.Port -le 0) {
+            & $getFreePort
+        }
+        else {
+            $CallbackUri.Port
+        }
+
+        # Test if the CallbackUri's port is available
+        $port = if (& $testPort -PortToTest $CallbackUri.Port) {
+            # Port is free—use the original CallbackUri port
+            $CallbackUri.Port
+        }
+        else {
+            Write-Log -Level Warning -Message "(New-BotConfiguration) Port $($CallbackUri.Port) isn't available right now; Picking a free one for you." -UseColor
+            & $getFreePort
+        }
+
+
+        # Build the authority portion:
+        # - If port is default HTTP (80) or HTTPS (443), omit port.
+        # - Otherwise include host:port.
+        $authority = if (-not $port -or ($port -eq 80 -or $port -eq 443)) {
+            "$host"
+        }
+        else {
+            "$($host):$port"
+        }
+
+        # Combine scheme, authority, and bot path into the final URL
+        return "$($scheme)://$($authority)/bot/v1/monitor/$($BotId)"
     }
 
-    $Token = if (-not $Token) { $env:G4_LICENSE_TOKEN } else { $Token }
-    $DriverBinaries = if(-not $DriverBinaries) { $env:DRIVER_BINARIES } else { $DriverBinaries }
+    # Imports environment settings from the specified file, with optional exclusions and additions.
+    & $importEnvironment `
+        -EnvironmentFilePath            $EnvironmentFilePath `
+        -SkipNames                      @() `
+        -AdditionalEnvironmentVariables @()
+
+    # Environment
+    $BotName        = if(-not $BotName)        { $env:BOT_NAME }         else { $BotName }
+    $BotVolume      = if(-not $BotVolume)      { $env:BOT_VOLUME }       else { $BotVolume }
+    $DriverBinaries = if(-not $DriverBinaries) { $env:DRIVER_BINARIES }  else { $DriverBinaries }
+    $HubUri         = if(-not $HubUri)         { $env:G4_HUB_URI }       else { $HubUri }
+    $Token          = if(-not $Token)          { $env:G4_LICENSE_TOKEN } else { $Token }
+
+    $saveResponse   = $env:SAVE_RESPONSE -match "(?i)^true$"
+    $saveErrors     = $env:SAVE_ERRORS   -match "(?i)^true$"
+
+    $botId                      = if([string]::IsNullOrEmpty($BotId)) { "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" } else { $BotId }
+    $ipv4                       = & $getRemoteIpv4
+    $defaultUri                 = [Uri]::new("http://$($ipv4):9213")
+    [Uri]$botCallbackUri        = if(-not [string]::IsNullOrEmpty($CallbackUri))     { [Uri]::new($CallbackUri) }     else { $defaultUri }
+    [Uri]$botCallbackIngress    = if(-not [string]::IsNullOrEmpty($CallbackIngress)) { [Uri]::new($CallbackIngress) } else { $defaultUri }
+    $botCallbackUriAbsolute     = & $formatCallback -CallbackUri $botCallbackUri     -BotId $botId
+    $botCallbackIngressAbsolute = $botCallbackIngress.AbsoluteUri.TrimEnd('/')
 
 
+    #$botCallbackIngressAbsolute = if(-not [string]::IsNullOrEmpty($CallbackIngress)) { $botCallbackIngressAbsolute } else { $botCallbackUriAbsolute }
+    #$botCallbackUriAbsolute     = if(-not [string]::IsNullOrEmpty($CallbackUri)) { $botCallbackUriAbsolute } else { $botCallbackIngressAbsolute }
+    
+    
+    
+    $callbackPort            = [Uri]::new($botCallbackIngressAbsolute).Port
+    $EntryPointPort          = & $convertToNumber -Number $env:G4_ENTRYPOINT_PORT      -DefaultValue 8090
+    $RegistrationTimeout     = & $convertToNumber -Number $env:G4_REGISTRATION_TIMEOUT -DefaultValue 60
+    $WatchDogPollingInterval = & $convertToNumber -Number $env:G4_WATCHDOG_INTERVAL    -DefaultValue 60
+
+    $BotType = if(-not $BotType) { 'generic-bot' } else { $BotType }
+    
     return @{
         Metadata = [PSCustomObject]@{
             BotId   = $botId
@@ -171,21 +284,29 @@ function New-BotConfiguration {
         
         Endpoints = [PSCustomObject]@{
             Base64InvokeUri     = & $joinUri $HubUri '/api/v4/g4/automation/base64/invoke'
-            BotCallbackPrefix   = "http://+:$($CallbackPort)/bot/v1/monitor/$($botId)/"
-            BotCallbackUri      = "http://$($ipv4):$($CallbackPort)/bot/v1/monitor/$($botId)"
+            BotCallbackIngress  = $botCallbackIngressAbsolute
+            BotCallbackPrefix   = "http://+:$($callbackPort)/bot/v1/monitor/$($botId)/"
+            BotCallbackUri      = $botCallbackUriAbsolute
             BotEntryPointPrefix = "http://+:$($EntryPointPort)/bot/v1/$($BotName)/"
             BotEntryPointUri    = "http://$($ipv4):$($EntryPointPort)/bot/v1/$($BotName)"
-            CallbackPort        = $CallbackPort
+            CallbackPort        = $callbackPort
             DriverBinaries      = $DriverBinaries
             HubUri              = $HubUri
         }
+
         Directories = [PSCustomObject]@{
-            BotAutomationDirectory = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot')
-            BotAutomationFile      = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot', 'automation.json')
-            BotDirectory           = Join-Path $BotVolume $BotName
-            BotErrorsDirectory     = [System.IO.Path]::Combine($BotVolume, $BotName, "errors")
-            BotOutputDirectory     = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
-            BotVolume              = $BotVolume
+            BotAutomationDirectory  = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot')
+            BotAutomationFile       = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot', 'automation.json')
+            BotDirectory            = Join-Path $BotVolume $BotName
+            BotErrorsDirectory      = [System.IO.Path]::Combine($BotVolume, $BotName, "errors")
+            BotOutputDirectory      = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
+            BotExtractionsDirectory = [System.IO.Path]::Combine($BotVolume, $BotName, "extractions")
+            BotVolume               = $BotVolume
+        }
+
+        Settings = [PSCustomObject]@{
+            SaveErrors   = $saveErrors
+            SaveResponse = $saveResponse
         }
 
         Timeouts = [PSCustomObject]@{
@@ -240,7 +361,7 @@ function Get-RemoteIPv4 {
     param()
 
     # Invoke the predefined script-block to get the first non-loopback IPv4 address
-    # and return it as the function’s output.
+    # and return it as the function's output.
     return & $getRemoteIpv4
 }
 
@@ -493,6 +614,39 @@ function Test-BotFile {
 
 <#
 .SYNOPSIS
+    Tests whether a specified TCP port is open or available.
+
+.DESCRIPTION
+    The Test-Port function wraps and invokes an underlying port-testing implementation
+    (a scriptblock or function stored in $testPort) to determine if the given port
+    on the local machine is accepting connections.
+
+.PARAMETER PortToTest
+    The TCP port number to test. Must be an integer between 1 and 65535.
+
+.EXAMPLE
+    Test-Port -PortToTest 80
+    # Tests TCP port 80 on the local machine and returns $true if open, $false otherwise.
+
+.NOTES
+    Requires that a scriptblock or function named $testPort exists in the session,
+    taking a -PortToTest parameter and returning a Boolean result.
+#>
+function Test-Port {
+    [CmdletBinding()]  # Enables advanced function features (common parameters, pipeline support, etc.)
+    param(
+        # The TCP port number to test (required, position 0).
+        [Parameter(Mandatory = $true, Position = 0)]
+        [ValidateRange(1, 65535)]
+        [int]$PortToTest
+    )
+
+    # Invoke the underlying port-test logic and return its Boolean result
+    return & $testPort -PortToTest $PortToTest
+}
+
+<#
+.SYNOPSIS
     Pauses script execution for a specified interval after displaying the next scheduled invocation time.
 
 .DESCRIPTION
@@ -536,4 +690,5 @@ Export-ModuleMember -Function Join-Uri
 Export-ModuleMember -Function New-BotConfiguration
 Export-ModuleMember -Function Send-BotAutomationRequest
 Export-ModuleMember -Function Test-BotFile
+Export-ModuleMember -Function Test-Port
 Export-ModuleMember -Function Wait-Interval

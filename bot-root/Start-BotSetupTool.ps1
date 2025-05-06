@@ -1,4 +1,99 @@
-﻿function Import-EnvironmentVariablesFile {
+﻿# Change to the script's own directory so any relative paths resolve correctly
+Set-Location -Path $PSScriptRoot
+
+# Import the setup and common modules for bot initialization and utilities
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotSetup.psm1')) -Force
+
+# Return to the script directory (in case module import changed location)
+Set-Location -Path $PSScriptRoot
+
+# Build the bot's configuration object (endpoints, metadata, timeouts)
+$botConfiguration = New-BotConfiguration -EnvironmentFilePath (Join-Path $PSScriptRoot ".env")
+
+$commonParameters = @(
+    [ordered]@{
+        Default          = $botConfiguration.Metadata.BotId
+        Description      = "Unique identifier for this bot instance; used to generate distinct HTTP listener prefixes and callback endpoint URLs."
+        EnvironmentValue = $botConfiguration.Metadata.BotId
+        Mandatory        = $true
+        Name             = "BotId"
+        Type             = "String"
+    },
+    [ordered]@{
+        Default          = ""
+        Description      = "The root directory where the bot will operate."
+        EnvironmentValue = $botConfiguration.Directories.BotVolume
+        Mandatory        = $true
+        Name             = "BotVolume"
+        Type             = "String"
+    },
+    [ordered]@{
+        Default          = "g4-bot"
+        Description      = "The name of the bot."
+        EnvironmentValue = $botConfiguration.Directories.BotName
+        Mandatory        = $true
+        Name             = "BotName"
+        Type             = "String"
+    },
+    [ordered]@{
+        Default          = ""
+        Description      = "The external callback ingress URL for routing callback requests to the G4 service (e.g. a Kubernetes Ingress host or Docker's host.docker.internal)."
+        EnvironmentValue = $env:G4_CALLBACK_INGRESS
+        Mandatory        = $false
+        Name             = "CallbackIngress"
+        Type             = "String"
+    },
+    [ordered]@{
+        Default          = ""
+        Description      = "The callback URI where the background job's HTTP listener receives incoming requests."
+        EnvironmentValue = $env:CALLBACK_URI
+        Mandatory        = $false
+        Name             = "CallbackUri"
+        Type             = "string"
+    },
+    [ordered]@{
+        Default          = "http://localhost:4444/wd/hub"
+        Description      = "The directory containing the drivers, or the grid endpoint."
+        EnvironmentValue = $env:DRIVER_BINARIES
+        Mandatory        = $true
+        Name             = "DriverBinaries"
+        Type             = "String"
+    },
+    [ordered]@{
+        Default          = "http://localhost:9944"
+        Description      = "The base URI of the G4 Hub endpoint to which automation configurations are sent."
+        EnvironmentValue = $env:G4_HUB_URI
+        Mandatory        = $true
+        Name             = "HubUri"
+        Type             = "String"
+    },
+    [ordered]@{
+        Default          = ""
+        Description      = "The authentication token (G4 License token) required for accessing the G4 Hub."
+        EnvironmentValue = $env:G4_LICENSE_TOKEN
+        Mandatory        = $false
+        Name             = "Token"
+        Type             = "String"
+    },
+    [ordered]@{
+        Default          = $false
+        Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
+        EnvironmentValue = ""
+        Mandatory        = $false
+        Name             = "Docker"
+        Type             = "Switch"
+    },
+    [ordered]@{
+        Default          = "Normal"
+        Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+        EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+        Mandatory        = $false
+        Name             = "WindowStyle"
+        Type             = "String"
+    }
+)
+
+function Import-EnvironmentVariablesFile {
     <#
     .SYNOPSIS
         Imports environment variables from an environment file and additional parameters into the current session.
@@ -336,7 +431,7 @@ function Show-Wizard {
                 Write-Host "This parameter is mandatory. Please provide a value." -ForegroundColor Red
                 $content = $null
             }
-        } while ([string]::IsNullOrWhiteSpace($content))
+        } while ([string]::IsNullOrWhiteSpace($content) -and $wizardParameter.Mandatory)
         
         # Build the parameter string based on type.
         switch ($wizardParameter.Type.ToLower()) {
@@ -1181,7 +1276,7 @@ function Start-CronBotWizard {
         },
         [ordered]@{
             Default          = "Normal"
-            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
             EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
             Mandatory        = $false
             Name             = "WindowStyle"
@@ -1278,7 +1373,7 @@ function Start-FileListenerBotWizard {
         },
         [ordered]@{
             Default          = "Normal"
-            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
             EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
             Mandatory        = $false
             Name             = "WindowStyle"
@@ -1318,7 +1413,7 @@ function Start-G4HubWizard {
     $wizardParameters = @(
         [ordered]@{
             Default          = "Normal"
-            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
             EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
             Mandatory        = $false
             Name             = "WindowStyle"
@@ -1571,7 +1666,7 @@ function Start-HttpListenerBotWizard {
         },
         [ordered]@{
             Default          = "Normal"
-            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
             EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
             Mandatory        = $false
             Name             = "WindowStyle"
@@ -1726,7 +1821,7 @@ function Start-PartitionCleanupBotWizard {
         },
         [ordered]@{
             Default          = "Normal"
-            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
             EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
             Mandatory        = $false
             Name             = "WindowStyle"
@@ -1768,78 +1863,14 @@ function Start-StaticBotWizard {
     # Default, Description, Mandatory, and Name.
     $wizardParameters = @(
         [ordered]@{
-            Default          = ""
-            Description      = "The root directory where the bot will operate."
-            EnvironmentValue = $env:BOT_VOLUME
-            Mandatory        = $true
-            Name             = "BotVolume"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "g4-static-bot"
-            Description      = "The name of the bot."
-            EnvironmentValue = $env:STATIC_BOT_NAME
-            Mandatory        = $true
-            Name             = "BotName"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "http://localhost:4444/wd/hub"
-            Description      = "The directory containing the drivers, or the grid endpoint."
-            EnvironmentValue = $env:DRIVER_BINARIES
-            Mandatory        = $true
-            Name             = "DriverBinaries"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "http://localhost:9944"
-            Description      = "The base URI of the G4 Hub endpoint to which automation configurations are sent."
-            EnvironmentValue = $env:G4_HUB_URI
-            Mandatory        = $true
-            Name             = "HubUri"
-            Type             = "String"
-        },
-        [ordered]@{
             Default          = 60
             Description      = "The interval (in seconds) between each bot call."
             EnvironmentValue = $env:STATIC_BOT_INTERVAL_TIME
             Mandatory        = $true
             Name             = "IntervalTime"
             Type             = "Number"
-        },
-        [ordered]@{
-            Default          = 8085
-            Description      = "The port used by the background job's HTTP listener to receive incoming requests."
-            EnvironmentValue = $env:G4_LISTENER_PORT
-            Mandatory        = $true
-            Name             = "ListenerPort"
-            Type             = "Number"
-        },
-        [ordered]@{
-            Default          = ""
-            Description      = "The authentication token (G4 License token) required for accessing the G4 Hub."
-            EnvironmentValue = $env:G4_LICENSE_TOKEN
-            Mandatory        = $true
-            Name             = "Token"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = $false
-            Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
-            EnvironmentValue = ""
-            Mandatory        = $false
-            Name             = "Docker"
-            Type             = "Switch"
-        },
-        [ordered]@{
-            Default          = "Normal"
-            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
-            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
-            Mandatory        = $false
-            Name             = "WindowStyle"
-            Type             = "String"
         }
-    )
+    ) + $commonParameters
 
     # Call the Show-Wizard function with the specified title, wizard parameters, and script.
     Show-Wizard `
@@ -1935,7 +1966,7 @@ function Start-StandaloneUiaDriverServerWizard {
         },
         [ordered]@{
             Default          = "Normal"
-            Description      = "Determines the PowerShell console window’s display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
+            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
             EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
             Mandatory        = $false
             Name             = "WindowStyle"

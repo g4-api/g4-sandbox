@@ -1,5 +1,5 @@
 # Import the bot logger utility modules
-Import-Module './BotLogger.psm1' -Force
+Import-Module (Join-Path $PSScriptRoot 'BotLogger.psm1') -Force
 
 # Scriptblock to join a base URI and a relative path into a single normalized URI with exactly one '/' separator
 $joinUri = {
@@ -36,13 +36,14 @@ $pingUri = {
 # Scriptblock to register a bot with the central hub
 $registerBot = {
     param(
-        $BotId,       # Unique identifier for the bot
-        $BotName,     # Human-readable name of the bot
-        $BotType,     # Type/category of the bot
-        $CallbackUri, # URI where the bot listens for callbacks
-        $HubUri,      # Base URI of the central hub
-        $Machine,     # Machine name or identifier where the bot runs
-        $OsVersion    # Operating system version of the bot's host
+        $BotId,           # Unique identifier for the bot
+        $BotName,         # Human-readable name of the bot
+        $BotType,         # Type/category of the bot
+        $CallbackIngress, # External ingress host or URL (e.g. host.docker.internal) used to route incoming callbacks to the bot
+        $CallbackUri,     # Local listener URI (e.g. http://+:9213/) where the bot's HTTP listener receives callback requests
+        $HubUri,          # Base URI of the central hub
+        $Machine,         # Machine name or identifier where the bot runs
+        $OsVersion        # Operating system version of the bot's host
     )
 
     # Initialize placeholders for HTTP response and message output
@@ -86,12 +87,13 @@ $registerBot = {
 
         # Build the JSON payload for registration
         $body = @{
-            callbackUri = $CallbackUri
-            id          = $BotId
-            machine     = $Machine
-            name        = $BotName
-            osVersion   = $OsVersion
-            type        = $BotType
+            callbackIngress = $CallbackIngress
+            callbackUri     = $CallbackUri
+            id              = $BotId
+            machine         = $Machine
+            name            = $BotName
+            osVersion       = $OsVersion
+            type            = $BotType
         } | ConvertTo-Json -Compress
 
         # Construct the registration endpoint URL
@@ -133,8 +135,9 @@ $startBotCallbackListener = {
     # Determine the path to BotLogger.psm1 (assumes it's in the same folder as this script)
     $modulePath = Join-Path $PSScriptRoot 'BotLogger.psm1'
 
-    # Build an InitialSessionState and import your BotLogger module into it
+    # Build an InitialSessionState and import modules into it
     $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+    $iss.ImportPSModule('Microsoft.PowerShell.Utility')
     $iss.ImportPSModule($modulePath)
 
     # Create & open the runspace with that ISS
@@ -144,6 +147,31 @@ $startBotCallbackListener = {
     # Create a new in-process runspace for monitoring and registration logic
     $powerShell = [PowerShell]::Create()
     $powerShell.Runspace = $runspace
+
+    # Create empty PSDataCollections for input/output (required by PS5 BeginInvoke signature)
+    $inputBuffer  = [System.Management.Automation.PSDataCollection[PSObject]]::new()
+    $outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
+
+    # Relay warnings from the runspace
+    $powerShell.Streams.Warning.add_DataAdded({
+        param($sender, $eventArgs)
+
+        $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+        [Console]::ForegroundColor = [ConsoleColor]::Yellow
+        [Console]::WriteLine("$($timestamp) - WRN: (Start-BotCallbackListener) $($sender[$eventArgs.Index].Message)")
+        [Console]::ResetColor()
+    })
+
+    # Only wire up informational relaying if the session is configured to show Information streams
+    if ($InformationPreference -eq 'Continue') {
+        # Relay informational messages from the runspace
+        $powerShell.Streams.Information.add_DataAdded({
+            param($sender, $eventArgs)
+
+            $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+            [Console]::WriteLine("$($timestamp) - INF: (Start-BotCallbackListener) $($sender[$eventArgs.Index].MessageData)")
+        })
+    }
 
     # Define the listener logic, now accepting Prefix and BotId
     $powerShell.AddScript({
@@ -163,9 +191,9 @@ $startBotCallbackListener = {
                 $context = $listener.GetContext()
 
                 # Reject requests from other bots sharing this listener port
-                # Only allow requests whose path exactly matches /bot/v1/monitor/<BotId>
+                # Only allow requests whose path exactly matches /bot/v1/monitor/<BotId>               
                 if ($context.Request.Url.AbsolutePath -notcontains "/bot/v1/monitor/$($BotId)") {
-                    Write-Warning "(Start-BotCallbackListener) Request path '$($context.Request.Url.AbsolutePath)' does not match '/bot/v1/monitor/<BotId>'; Returning 403 Forbidden."
+                    Write-Warning "(Start-BotCallbackListener) Request path '$($context.Request.Url.AbsolutePath)' does not match '/bot/v1/monitor/$($BotId)'; Returning 403 Forbidden."
                     $context.Response.StatusCode = 403
                     $context.Response.Close()
                     continue
@@ -175,21 +203,21 @@ $startBotCallbackListener = {
                 switch ($context.Request.HttpMethod) {
                     'DELETE' {
                         # Client requested shutdown: send 204 No Content and exit successfully
-                        Write-Warning "(Start-BotCallbackListener) Received DELETE on '/bot/v1/monitor/<BotId>'; Shutting down..."
+                        Write-Warning "Received DELETE on '/bot/v1/monitor/$($BotId)'; Shutting down..."
                         $context.Response.StatusCode = 204
                         $context.Response.Close()
                         exit 0
                     }
                     'GET' {
                         # Health check: send 200 OK and continue listening
-                        Write-Information "(Start-BotCallbackListener) Health check received on '/bot/v1/monitor/<BotId>'; Returning 200 OK."
+                        Write-Information "Health check received on '/bot/v1/monitor/$($BotId)'; Returning 200 OK."
                         $context.Response.StatusCode = 200
                         $context.Response.Close()
                         continue
                     }
                     default {
                         # Unsupported method: send 405 Method Not Allowed
-                        Write-Warning "(Start-BotCallbackListener) Unsupported HTTP method '$($context.Request.HttpMethod)' on '/bot/v1/monitor/<BotId>'; Returning 405 Method Not Allowed."
+                        Write-Warning "Unsupported HTTP method '$($context.Request.HttpMethod)' on '/bot/v1/monitor/$($BotId)'; Returning 405 Method Not Allowed."
                         $context.Response.StatusCode = 405
                         $context.Response.Close()
                     }
@@ -198,7 +226,7 @@ $startBotCallbackListener = {
         }
         catch {
             # On any exception, exit with error code
-            Write-Warning "(Start-BotCallbackListener) Callback listener exception: $($_.Exception.Message); Exiting with error code 1."
+            Write-Warning "Callback listener exception: $($_.Exception.Message); Exiting with error code 1."
             exit 1
         }
         finally {
@@ -211,25 +239,6 @@ $startBotCallbackListener = {
     # Pass the Prefix and BotId arguments into the scriptblock
     $powerShell.AddArgument($Prefix)
     $powerShell.AddArgument($BotId)
-
-    # Create empty PSDataCollections for input/output (required by PS5 BeginInvoke signature)
-    $inputBuffer  = [System.Management.Automation.PSDataCollection[PSObject]]::new()
-    $outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
-
-    # Relay warnings from the runspace
-    $powerShell.Streams.Warning.add_DataAdded({
-        param($sender, $eventArgs)
-        Write-Log -Level Warning -Message $sender[$eventArgs.Index].Message -UseColor
-    })
-
-    # Only wire up informational relaying if the session is configured to show Information streams
-    if ($InformationPreference -eq 'Continue') {
-        # Relay informational messages from the runspace
-        $powerShell.Streams.Information.add_DataAdded({
-            param($sender, $eventArgs)
-            Write-Log -Level Information -Message $sender[$eventArgs.Index].MessageData -UseColor
-        })
-    }
     
     # Start the runspace asynchronously, capturing the IAsyncResult
     $async = $powerShell.BeginInvoke($inputBuffer, $outputBuffer)
@@ -263,7 +272,7 @@ $testBotConnection = {
         # If anything goes wrong (network error or non-2xx status), return an error indicator
         return [PSCustomObject]@{
             BotStatus = "Error"
-            Response  = $null
+            Response  = [PSCustomObject]@{ message = $_.Exception.Message }
         }
     }
 }
@@ -308,7 +317,7 @@ $updateBot = {
             -Method      Put `
             -Uri         $uri `
             -Body        $body `
-            -ContentType "application/json; charset=utf-8"
+            -ContentType "application/json; charset=utf-8" | Out-Null
 
         # On success, prepare a confirmation message
         $message = "Bot '$($BotName)' (ID: $($BotId)) updated successfully at '$($uri)' (HTTP $($response.StatusCode))."
@@ -380,6 +389,7 @@ $updateBot = {
 function Start-BotCallbackListener {
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory)][string] $BotCallbackIngress,
         [Parameter(Mandatory)][string] $BotCallbackUri,
         [Parameter(Mandatory)][string] $BotCallbackPrefix,
         [Parameter(Mandatory)][string] $BotId,
@@ -397,6 +407,7 @@ function Start-BotCallbackListener {
     Write-Information ''                                                                    -Tags Endpoint -InformationAction Continue
     Write-Information "Hub Ping URI:            $($HubUri)/api/v4/g4/ping"                  -Tags Endpoint -InformationAction Continue 
     Write-Information "Bot Status URI:          $($HubUri)/api/v4/g4/bots/status/$($BotId)" -Tags Endpoint -InformationAction Continue 
+    Write-Information "Bot Callback Ingress:    $($BotCallbackIngress)"                     -Tags Endpoint -InformationAction Continue
     Write-Information "Bot Callback URI:        $($BotCallbackUri)"                         -Tags Endpoint -InformationAction Continue
     Write-Information "Monitor Endpoint Prefix: $($BotCallbackPrefix)"                      -Tags Endpoint -InformationAction Continue
     Write-Information '--- END -------------------'                                         -Tags Endpoint -InformationAction Continue
@@ -411,13 +422,14 @@ function Start-BotCallbackListener {
         # 1) Try to register the bot with the hub
         Write-Verbose "Attempting to register bot '$BotName' (ID: $($BotId)) at '$($HubUri)'."
         $response = & $registerBot `
-            -BotId       $BotId `
-            -BotName     $BotName `
-            -BotType     $BotType `
-            -CallbackUri $BotCallbackUri `
-            -HubUri      $HubUri `
-            -Machine     ([Environment]::MachineName) `
-            -OsVersion   ([Environment]::OSVersion.VersionString)
+            -BotId           $BotId `
+            -BotName         $BotName `
+            -BotType         $BotType `
+            -CallbackIngress $BotCallbackIngress `
+            -CallbackUri     $BotCallbackUri `
+            -HubUri          $HubUri `
+            -Machine         ([Environment]::MachineName) `
+            -OsVersion       ([Environment]::OSVersion.VersionString)
 
         # If registration failed (no response or HTTP >= 400), warn and retry
         if (-not $response.Value -or $response.Value.StatusCode -ge 400) {
@@ -446,8 +458,8 @@ function Start-BotCallbackListener {
         }
 
         # Otherwise, the listener failed to initialize—warn and retry
-        Write-Warning "Listener startup did not begin as expected."
-        Write-Information "Retrying listener startup..."
+        Write-Log -Level Warning -Message "(Start-BotCallbackListener) Listener startup did not begin as expected." -UseColor
+        Write-Log -Level Verbose -Message "(Start-BotCallbackListener) Retrying listener startup." -UseColor
         Start-Sleep -Seconds 1
     }
 
@@ -520,6 +532,7 @@ function Start-BotCallbackListener {
 function Start-BotWatchDog {
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory)][string] $BotCallbackIngress,
         [Parameter(Mandatory)][string] $BotCallbackUri,
         [Parameter(Mandatory)][string] $BotCallbackPrefix,
         [Parameter(Mandatory)][string] $BotId,
@@ -534,8 +547,9 @@ function Start-BotWatchDog {
     # Determine the path to BotLogger.psm1 (assumes it's in the same folder as this script)
     $modulePath = Join-Path $PSScriptRoot 'BotLogger.psm1'
 
-    # Build an InitialSessionState and import your BotLogger module into it
+    # Build an InitialSessionState and import modules into it
     $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+    $iss.ImportPSModule('Microsoft.PowerShell.Utility')
     $iss.ImportPSModule($modulePath)
 
     # Create & open the runspace with that ISS
@@ -546,20 +560,58 @@ function Start-BotWatchDog {
     $powerShell = [PowerShell]::Create()
     $powerShell.Runspace = $runspace
 
+    # Create empty PSDataCollections for input/output (required by PS5 BeginInvoke signature)
+    $inputBuffer  = [System.Management.Automation.PSDataCollection[PSObject]]::new()
+    $outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
+
+    # Relay warnings from the runspace
+    $powerShell.Streams.Warning.add_DataAdded({
+        param($sender, $eventArgs)
+
+        $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+        [Console]::ForegroundColor = [ConsoleColor]::Yellow
+        [Console]::WriteLine("$($timestamp) - WRN: (Start-BotWatchDog) $($sender[$eventArgs.Index].Message)")
+        [Console]::ResetColor()
+    })
+
+    # Only wire up informational relaying if the session is configured to show Information streams
+    if ($InformationPreference -eq 'Continue') {
+        # Relay informational messages from the runspace
+        $powerShell.Streams.Information.add_DataAdded({
+            param($sender, $eventArgs)
+
+            $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+            [Console]::WriteLine("$($timestamp) - INF: (Start-BotWatchDog) $($sender[$eventArgs.Index].MessageData)")
+        })
+    }
+
     # Add the script to the runspace, passing in all helper scriptblocks and parameters
     $powerShell.AddScript({      
         param(
-            $BotCallbackUri,    # HTTP callback URI for bot notifications
-            $BotId,             # Unique identifier for this bot
-            $BotName,           # Human-readable bot name
-            $BotType,           # Category/type of the bot
-            $HubUri,            # Base URI of the central hub service
-            $PollingInterval,   # Base interval (seconds) for polling/backoff
-            $JoinUri,           # Scriptblock to normalize and join URIs
-            $TestBotConnection, # Scriptblock to query bot's status endpoint
-            $RegisterBot,       # Scriptblock to register the bot with the hub
+            $BotCallbackIngress, # External ingress host or URL (e.g. host.docker.internal) used to route incoming callbacks to the bot
+            $BotCallbackUri,     # HTTP callback URI for bot notifications            
+            $BotId,              # Unique identifier for this bot
+            $BotName,            # Human-readable bot name
+            $BotType,            # Category/type of the bot
+            $HubUri,             # Base URI of the central hub service
+            $PollingInterval,    # Base interval (seconds) for polling/backoff
+            #$JoinUri,            # Scriptblock to normalize and join URIs
+            #$RegisterBot,        # Scriptblock to register the bot with the hub
             $ParentTask
         )
+
+        # Scriptblock to join a base URI and a relative path into a single normalized URI with exactly one '/' separator
+        $JoinUri = {
+            param($Base, $Path)
+
+            # Trim any trailing slash from the base, trim any leading slash from the path,
+            # then combine with a single '/' separator.
+            $normalizedBase = $Base.TrimEnd('/')
+            $normalizedPath = $Path.TrimStart('/')
+
+            # Return the combined URI string
+            return "$($normalizedBase)/$($normalizedPath)"
+        }
 
         # Scriptblock to test hub availability by GETting the /api/v4/g4/ping endpoint and returning True on HTTP < 400
         $PingUri = {
@@ -580,6 +632,122 @@ function Start-BotWatchDog {
             }
         }
 
+        # Scriptblock to query a bot's status endpoint and return both the status and full response as a PSCustomObject
+        $TestBotConnection = {
+            param(
+                [string]$Uri   # The endpoint URI to query for the bot's status
+            )
+
+            try {
+                # Perform an HTTP GET; stop on non-success status codes
+                $response = Invoke-RestMethod -Uri $Uri -Method Get -ErrorAction Stop
+
+                # Build and return a standardized object with the bot's status and full response
+                return [PSCustomObject]@{
+                    BotStatus = $response.status
+                    Response  = $response
+                }
+            }
+            catch {
+                # If anything goes wrong (network error or non-2xx status), return an error indicator
+                return [PSCustomObject]@{
+                    BotStatus = "Error"
+                    Response  = [PSCustomObject]@{ message = $_.Exception.Message }
+                }
+            }
+        }
+
+        # Scriptblock to register a bot with the central hub
+        $RegisterBot = {
+            param(
+                $BotId,           # Unique identifier for the bot
+                $BotName,         # Human-readable name of the bot
+                $BotType,         # Type/category of the bot
+                $CallbackIngress, # External ingress host or URL (e.g. host.docker.internal) used to route incoming callbacks to the bot
+                $CallbackUri,     # Local listener URI (e.g. http://+:9213/) where the bot's HTTP listener receives callback requests
+                $HubUri,          # Base URI of the central hub
+                $Machine,         # Machine name or identifier where the bot runs
+                $OsVersion        # Operating system version of the bot's host
+            )
+
+            # Initialize placeholders for HTTP response and message output
+            $response = $null
+            $message  = ''
+
+            # Ensure HubUri has no trailing slash for consistent endpoint building
+            $HubUri = $HubUri.TrimEnd('/')
+
+            # Scriptblock to check whether the bot is already registered/active
+            $isRegister = {
+                param($StatusUri)
+
+                try {
+                    # Perform GET request against the status endpoint
+                    $botStatus = Invoke-WebRequest -Uri $uri -Method Get
+
+                    # Return True if status is NOT one of the terminal states
+                    return $botStatus.status.ToUpper() -notin ("REMOVED", "LOCKED", "UNREACHABLE", "OFFLINE")
+                }
+                catch {
+                    # On any error (network, parsing, etc.), treat as not registered
+                    return $false
+                }
+            }
+
+            try {
+                # Build the URL to fetch the bot's current status
+                $uri = "$($HubUri)/api/v4/g4/bots/status/$($BotId)"
+
+                # Initialize the message for the "already registered" case
+                $message = "Bot '$($BotName)' (ID: $($BotId)) is already registered and active at '$($uri)'."
+
+                # If bot is already registered/active, return an HTTP-200-like result immediately
+                if (& $isRegister -StatusUri $uri) {
+                    return [PSCustomObject]@{
+                        Value   = @{ StatusCode = 200 }
+                        Message = $message
+                    }
+                }
+
+                # Build the JSON payload for registration
+                $body = @{
+                    callbackIngress = $CallbackIngress
+                    callbackUri     = $CallbackUri
+                    id              = $BotId
+                    machine         = $Machine
+                    name            = $BotName
+                    osVersion       = $OsVersion
+                    type            = $BotType
+                } | ConvertTo-Json -Compress
+
+                # Construct the registration endpoint URL
+                $uri = "$($HubUri)/api/v4/g4/bots/register"
+
+                # Send the registration POST request
+                $response = Invoke-WebRequest `
+                    -Method      Post `
+                    -Uri         $uri `
+                    -Body        $body `
+                    -ContentType "application/json; charset=utf-8"
+
+                # On success, prepare a descriptive confirmation message
+                $message = "Bot '$($BotName)' (ID: $($BotId)) successfully registered at '$($uri)'."
+            }
+            catch {
+                # If any exception occurs, capture its message for troubleshooting
+                $message = "Failed to register bot '$($BotName)' (ID: $($BotId)) at '$($uri)'. Error: $($_.Exception.Message)"
+
+                # Fallback to Internal Server Error (HTTP 500)
+                $response = [PSCustomObject]@{ StatusCode = 500 }
+            }
+
+            # Return a standardized object with raw HTTP response and user-friendly message
+            return [PSCustomObject]@{
+                Value   = $response
+                Message = $message
+            }
+        }
+
         # Enable verbose and information streams for detailed logging
         $DebugPreference       = 'Continue'
         $InformationPreference = 'Continue'
@@ -594,7 +762,7 @@ function Start-BotWatchDog {
             try {
                 # 1. Ping the hub: if it fails, warn and back off
                 if (-not (& $PingUri -Uri $hubPingUri)) {
-                    Write-Warning "(Start-BotWatchDog) Ping to '$($hubPingUri)' failed. Waiting $($PollingInterval) seconds before retry."
+                    Write-Warning "Ping to '$($hubPingUri)' failed. Waiting $($PollingInterval) seconds before retry."
                     Start-Sleep -Seconds $PollingInterval
                     continue
                 }
@@ -602,69 +770,52 @@ function Start-BotWatchDog {
                 # 2. Check the bot's current state: skip registration if already READY/WORKING
                 $statusResult = & $TestBotConnection -Uri $statusUri
                 if ($statusResult.BotStatus.ToUpper() -in 'READY','WORKING') {
-                    Write-Information "(Start-BotWatchDog) Bot at '$($statusUri)' is '$($statusResult.BotStatus)'; Skipping Registration."
+                    Write-Information "Bot at '$($statusUri)' is '$($statusResult.BotStatus)'; Skipping Registration."
                     Start-Sleep -Seconds $PollingInterval
                     continue
                 }
 
                 # 3. Register the bot: log, invoke helper, then check HTTP response
-                Write-Information "(Start-BotWatchDog) Registering bot '$($BotName)' (ID: $($BotId)) at '$($HubUri)'..."
+                Write-Information "Registering bot '$($BotName)' (ID: $($BotId)) at '$($HubUri)'..."
                 $response = & $RegisterBot `
-                    -BotId       $BotId `
-                    -BotName     $BotName `
-                    -BotType     $BotType `
-                    -CallbackUri $BotCallbackUri `
-                    -HubUri      $HubUri `
-                    -Machine     ([Environment]::MachineName) `
-                    -OsVersion   ([Environment]::OSVersion.VersionString)
+                    -BotId           $BotId `
+                    -BotName         $BotName `
+                    -BotType         $BotType `
+                    -CallbackIngress $BotCallbackIngress `
+                    -CallbackUri     $BotCallbackUri `
+                    -HubUri          $HubUri `
+                    -Machine         ([Environment]::MachineName) `
+                    -OsVersion       ([Environment]::OSVersion.VersionString)
 
                 # 4. On failure (no response or StatusCode >= 400), warn and retry
                 if (-not $response.Value -or $response.Value.StatusCode -ge 400) {
-                    Write-Warning "(Watchdog) Registration to '$($hubPingUri)' failed. Waiting $($PollingInterval) seconds before retry."
+                    Write-Warning "Registration to '$($HubUri)' failed. Waiting $($PollingInterval) seconds before retry."
+                    Write-Warning $message
                     Start-Sleep -Seconds $PollingInterval
                     continue
                 }
 
                 # 5. On success, inform
-                Write-Information "(Start-BotWatchDog) Bot '$($BotName); $($BotId)' successfully registered."
+                Write-Information "Bot '$($BotName); $($BotId)' successfully registered."
             }
             catch {
-                Write-Warning "(Start-BotWatchDog) $($_)"
+                Write-Warning "$($_)"
                 Start-Sleep -Seconds $PollingInterval
             }
         }
     })
 
     # Add arguments matching the runspace script's param() order
+    $powerShell.AddArgument($BotCallbackIngress)
     $powerShell.AddArgument($BotCallbackUri)
     $powerShell.AddArgument($BotId)
     $powerShell.AddArgument($BotName)
     $powerShell.AddArgument($BotType)
     $powerShell.AddArgument($HubUri)
     $powerShell.AddArgument($PollingInterval)
-    $powerShell.AddArgument($joinUri)
-    $powerShell.AddArgument($testBotConnection)
-    $powerShell.AddArgument($registerBot)
+    #$powerShell.AddArgument($joinUri)
+    #$powerShell.AddArgument($registerBot)
     $powerShell.AddArgument($ParentTask)
-
-    # Create empty PSDataCollections for input/output (required by PS5 BeginInvoke signature)
-    $inputBuffer  = [System.Management.Automation.PSDataCollection[PSObject]]::new()
-    $outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
-
-    # Relay warnings from the runspace
-    $powerShell.Streams.Warning.add_DataAdded({
-        param($sender, $eventArgs)
-        Write-Log -Level Warning -Message $sender[$eventArgs.Index].Message -UseColor
-    })
-
-    # Only wire up informational relaying if the session is configured to show Information streams
-    if ($InformationPreference -eq 'Continue') {
-        # Relay informational messages from the runspace
-        $powerShell.Streams.Information.add_DataAdded({
-            param($sender, $eventArgs)
-            Write-Log -Level Information -Message $sender[$eventArgs.Index].MessageData -UseColor
-        })
-    }
 
     # Start the runspace asynchronously, capturing the IAsyncResult
     $async = $powerShell.BeginInvoke($inputBuffer, $outputBuffer)
@@ -723,31 +874,6 @@ function Update-BotStatus {
 
         # Return the combined URI string
         return "$($normalizedBase)/$($normalizedPath)"
-    }
-
-    # Scriptblock to query a bot's status endpoint and return both the status and full response as a PSCustomObject
-    $testBotConnection = {
-        param(
-            [string]$Uri   # The endpoint URI to query for the bot's status
-        )
-
-        try {
-            # Perform an HTTP GET; stop on non-success status codes
-            $response = Invoke-RestMethod -Uri $Uri -Method Get -ErrorAction Stop
-
-            # Build and return a standardized object with the bot's status and full response
-            return [PSCustomObject]@{
-                BotStatus = $response.status
-                Response  = $response
-            }
-        }
-        catch {
-            # If anything goes wrong (network error or non-2xx status), return an error indicator
-            return [PSCustomObject]@{
-                BotStatus = "Error"
-                Response  = $null
-            }
-        }
     }
 
     # Updates a bot's registration details (including status) at the central hub.
@@ -833,7 +959,7 @@ function Update-BotStatus {
         -HubUri      $HubUri `
         -Machine     ([Environment]::MachineName) `
         -OsVersion   ([Environment]::OSVersion.VersionString) `
-        -Status      $Status | Out-Null
+        -Status      $Status
 
     # Return the raw response object (and let the caller inspect response.StatusCode/message)
     return $response

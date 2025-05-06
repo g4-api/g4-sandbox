@@ -1,0 +1,59 @@
+version: "3.8"
+
+configs:
+  nginx_conf:
+    file: ./static-bot-compose-nginx.conf    # <-- must point to a real file
+
+services:
+  proxy:
+    image: nginx:stable
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/nginx.conf
+    ports:
+      - "54252:80"
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 0    # unlimited retries
+
+  g4-static-bot:
+    image: g4-static-bot:latest
+    volumes:
+      - C:/g4-bots-volume:/bots
+    environment:
+      BOT_NAME:         "g4-static-bot"
+      CALLBACK_INGRESS: "http://host.docker.internal:54252"
+      DRIVER_BINARIES:  "http://host.docker.internal:4444/wd/hub"
+      HUB_URI:          "http://host.docker.internal:9944"
+      INTERVAL_TIME:    "5"
+      TOKEN: >-
+        rTIlEC3IPr/GYlpGp7CLvnKUJOVrkQ1EqHwd875LZgRn712dg1cnZLAWblDr6f/
+        0Jc5LzyelEr5B7O4O3nZtKumTv4lXST78oM/hW8tCE40q97ZGjGX3oCVWjzj2t7jp9Jh9O0yn
+        Nm+WvJfmlQVPXdJLHIjetaIJJWfNZFKgbAFLPqKMIauUIaa2ytMq7lgjVASwKeZ4FRG6Cyy
+        frcLmw6u886UmlpK01Cqa1qy7HQuaiTwXdyFnrY20NjU01rsCm0RRKti/76w9PKK6Cy7mgA
+        kI9JkZQaCS3z9CdKUezu86FNYwkBdG1cnea3lf/FeO5xGa7SH9hNqeyMQeOOOAmwTiM6NeTd
+        15WvjEXFEBsfA=
+    expose:
+      - "54252"
+    deploy:
+      replicas: 3
+      endpoint_mode: dnsrr
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        delay: 5s
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: overlay

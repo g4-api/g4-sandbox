@@ -21,7 +21,6 @@
 .EXAMPLE
     .\Initialize-BotPartition.ps1 -BotVolume "C:\Bots" -BotName "MyBot"
 #>
-
 param(
     [Parameter(Mandatory=$true)]
     [string]$BotVolume,
@@ -40,7 +39,7 @@ if (!(Test-Path -Path $rootPath)) {
 }
 
 # Define the directories to create under the root directory
-$directories = @(".tmp", "archive", "bot", "errors", "input", "output")
+$directories = @(".tmp", "archive", "bot", "errors", "extractions", "input", "output")
 
 # Loop through each directory name in the array and create it if it doesn't exist
 foreach ($directory in $directories) {

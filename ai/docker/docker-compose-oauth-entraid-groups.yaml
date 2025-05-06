@@ -1,0 +1,53 @@
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    depends_on:
+      - chromadb
+    container_name: open-webui
+    restart: always
+    ports:
+      - "3000:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open-webui:/app/backend/data
+    networks:
+      - app-net
+    environment:
+      - ENV=dev
+      - VECTOR_DB=chroma
+      - CHROMA_HTTP_HOST=chromadb
+      - CHROMA_HTTP_PORT=8000
+      - MICROSOFT_CLIENT_ID=4991ac94-8bfc-4631-9661-8f7890bd9d43
+      - MICROSOFT_CLIENT_SECRET=dk78Q~nvrXxZe7df~neJo31Y9CFl-COy-DkrWar~
+      - MICROSOFT_CLIENT_TENANT_ID=3394be55-693a-4404-add0-aef6598abcec
+
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main
+    container_name: pipelines
+    restart: always
+    ports:
+      - "9099:9099"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - pipelines:/app/pipelines
+    networks:
+      - app-net
+    environment:
+      - PIPELINES_URLS=https://github.com/g4-api/g4-webui-pipelines/blob/main/pipelines/python_code_pipeline.py
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    networks:
+      - app-net
+
+volumes:
+  open-webui:
+  pipelines:
+
+networks:
+  app-net:
+    driver: bridge

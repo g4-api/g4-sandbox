@@ -27,7 +27,7 @@ param (
 
 Write-Host "Building Docker image '$ImageTag' using Dockerfile at '$DockerfilePath'..."
 try {
-    docker build -f $DockerfilePath -t $ImageTag .
+    docker build -f $DockerfilePath --no-cache -t $ImageTag .
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Docker image '$ImageTag' built successfully."
     }

@@ -2,7 +2,7 @@
 FROM ubuntu:24.04
 
 # Expose the internal port which will be used by the listener
-EXPOSE 8085
+EXPOSE 9213
 
 # Prevent interactive dialogs during package install
 ENV DEBIAN_FRONTEND=noninteractive
@@ -27,9 +27,10 @@ RUN apt-get update && \
 
 # Echo the variables in the desired format during build
 RUN echo "BOT_NAME: ${BOT_NAME}" && \
-    echo "LISTENER_PORT: ${LISTENER_PORT}" && \
+    echo "CALLBACK_INGRESS: ${CALLBACK_INGRESS}" && \
+    echo "CALLBACK_URI: ${CALLBACK_URI}" && \
     echo "DRIVER_BINARIES: ${DRIVER_BINARIES}" && \
-    echo "HUB_URI: ${HUB_URI}" && \
+    echo "HUB_URI: ${HUB_URI}" && \    
     echo "INTERVAL_TIME: ${INTERVAL_TIME}" && \
     echo "TOKEN: ${TOKEN}"
 
@@ -47,9 +48,13 @@ COPY modules /app/modules/
 # Make script executable (optional good practice)
 RUN chmod +x /app/Start-StaticBot.ps1
 
-# Pass four parameters to the script:
-#   1) The bot volume location (/bot)
-#   2) BotName from environment variable
-#   3) HubUri from environment variable
-#   4) IntervalTime from environment variable
-ENTRYPOINT ["pwsh", "-Command", "./Start-StaticBot.ps1 /bots $env:BOT_NAME $env:DRIVER_BINARIES $env:HUB_URI $env:INTERVAL_TIME $env:LISTENER_PORT $env:TOKEN"]
+SHELL ["/bin/sh", "-c"]
+ENTRYPOINT pwsh -NoLogo -File ./Start-StaticBot.ps1 \
+  -BotVolume       "/bots" \
+  -BotName         "$BOT_NAME" \
+  -CallbackIngress "$CALLBACK_INGRESS" \
+  -CallbackUri     "$CALLBACK_URI" \
+  -DriverBinaries  "$DRIVER_BINARIES" \
+  -HubUri          "$HUB_URI" \
+  -IntervalTime    "$INTERVAL_TIME" \
+  -Token           "$TOKEN"

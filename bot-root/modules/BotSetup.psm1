@@ -68,14 +68,16 @@ Import-Module './BotCommon.psm1'  -Force
 function Initialize-Bot {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]  [string] $BotName,
-        [Parameter(Mandatory = $true)]  [string] $BotType,
-        [Parameter(Mandatory = $true)]  [string] $BotVolume,
-        [Parameter(Mandatory = $false)] [int]    $CallbackPort,
+        [Parameter(Mandatory = $false)] [string] $BotId,
+        [Parameter(Mandatory = $false)] [string] $BotName,
+        [Parameter(Mandatory = $false)] [string] $BotType,
+        [Parameter(Mandatory = $false)] [string] $BotVolume,
+        [Parameter(Mandatory = $false)] [string] $CallbackUri,
+        [Parameter(Mandatory = $false)] [string] $CallbackIngress,
         [Parameter(Mandatory = $false)] [string] $DriverBinaries,
         [Parameter(Mandatory = $false)] [int]    $EntryPointPort,
         [Parameter(Mandatory = $true)]  [string] $EnvironmentFilePath,
-        [Parameter(Mandatory = $true)]  [string] $HubUri,
+        [Parameter(Mandatory = $false)] [string] $HubUri,
         [Parameter(Mandatory = $false)] [int]    $RegistrationTimeout,
         [Parameter(Mandatory = $false)] [string] $Token,
         [Parameter(Mandatory = $false)] [int]    $WatchDogPollingInterval
@@ -83,15 +85,18 @@ function Initialize-Bot {
 
     # 1) Build the bot’s configuration object (endpoints, metadata, timeouts)
     $BotConfiguration = New-BotConfiguration `
-        -BotName             $BotName `
-        -BotType             $BotType `
-        -BotVolume           $BotVolume `
-        -CallbackPort        $CallbackPort `
-        -DriverBinaries      $DriverBinaries `
-        -EntryPointPort      $EntryPointPort `
-        -EnvironmentFilePath $EnvironmentFilePath `
-        -HubUri              $HubUri `
-        -Token               $Token
+        -BotId                   $BotId `
+        -BotName                 $BotName `
+        -BotType                 $BotType `
+        -CallbackUri             $CallbackUri `
+        -CallbackIngress         $CallbackIngress `
+        -DriverBinaries          $DriverBinaries `
+        -EntryPointPort          $EntryPointPort `
+        -EnvironmentFilePath     $EnvironmentFilePath `
+        -HubUri                  $HubUri `
+        -RegistrationTimeout     $RegistrationTimeout `
+        -Token                   $Token `
+        -WatchDogPollingInterval $WatchDogPollingInterval
 
     # 2) Start the callback listener in the background and capture its job handle
     $botCallbackJob = Start-BotCallbackListener `
@@ -131,25 +136,27 @@ function Initialize-BotByConfiguration {
 
     # 1) Start the callback listener in the background and capture its job handle
     $botCallbackJob = Start-BotCallbackListener `
-        -BotCallbackUri    $botConfiguration.Endpoints.BotCallbackUri `
-        -BotCallbackPrefix $botConfiguration.Endpoints.BotCallbackPrefix `
-        -BotId             $botConfiguration.Metadata.BotId `
-        -BotName           $botConfiguration.Metadata.BotName `
-        -BotType           $botConfiguration.Metadata.BotType `
-        -HubUri            $botConfiguration.Endpoints.HubUri `
-        -Timeout           $botConfiguration.Timeouts.RegistrationTimeout
+        -BotCallbackIngress $botConfiguration.Endpoints.BotCallbackIngress `
+        -BotCallbackPrefix  $botConfiguration.Endpoints.BotCallbackPrefix `
+        -BotCallbackUri     $botConfiguration.Endpoints.BotCallbackUri `
+        -BotId              $botConfiguration.Metadata.BotId `
+        -BotName            $botConfiguration.Metadata.BotName `
+        -BotType            $botConfiguration.Metadata.BotType `
+        -HubUri             $botConfiguration.Endpoints.HubUri `
+        -Timeout            $botConfiguration.Timeouts.RegistrationTimeout
 
     # 2) Start the watchdog to monitor and re-register the bot until the callback job completes
     $botWatchdogJob = Start-BotWatchDog `
-        -BotCallbackUri    $botConfiguration.Endpoints.BotCallbackUri `
-        -BotCallbackPrefix $botConfiguration.Endpoints.BotCallbackPrefix `
-        -BotId             $botConfiguration.Metadata.BotId `
-        -BotName           $botConfiguration.Metadata.BotName `
-        -BotType           $botConfiguration.Metadata.BotType `
-        -HubUri            $botConfiguration.Endpoints.HubUri `
-        -Timeout           $botConfiguration.Timeouts.RegistrationTimeout `
-        -ParentTask        $botCallbackJob `
-        -PollingInterval   $botConfiguration.Timeouts.WatchDogPollingInterval
+        -BotCallbackIngress $botConfiguration.Endpoints.BotCallbackIngress `
+        -BotCallbackUri     $botConfiguration.Endpoints.BotCallbackUri `
+        -BotCallbackPrefix  $botConfiguration.Endpoints.BotCallbackPrefix `
+        -BotId              $botConfiguration.Metadata.BotId `
+        -BotName            $botConfiguration.Metadata.BotName `
+        -BotType            $botConfiguration.Metadata.BotType `
+        -HubUri             $botConfiguration.Endpoints.HubUri `
+        -Timeout            $botConfiguration.Timeouts.RegistrationTimeout `
+        -ParentTask         $botCallbackJob `
+        -PollingInterval    $botConfiguration.Timeouts.WatchDogPollingInterval
 
     # Return an object with configuration and job handles for upstream monitoring or cleanup
     return [PSCustomObject]@{

@@ -1,0 +1,4 @@
+docker swarm init
+docker swarm update --task-history-limit=0
+docker stack deploy --compose-file static-bot-compose.yml static-bots
+docker stack rm static-bots
