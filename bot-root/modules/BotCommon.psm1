@@ -467,6 +467,7 @@ function Get-NextFile {
         $resultObject = [PSCustomObject]@{
             StatusCode = 200
             Content    = $jsonContent
+            File       = $latestFile
             Reason     = "File processed successfully: $($latestFile.Name)"
         }
     }
@@ -475,6 +476,7 @@ function Get-NextFile {
         $resultObject = [PSCustomObject]@{
             StatusCode = 500
             Content    = $null
+            File       = $null
             Reason     = $_.Exception.GetBaseException().Message
         }
     }

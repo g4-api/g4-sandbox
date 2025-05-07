@@ -154,6 +154,13 @@ while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runne
             -HubUri $bot.Configuration.Endpoints.HubUri `
             -Status "Working" | Out-Null
 
+        Write-Log -UseColor -Level Verbose -Message (
+            "(Main) Starting processing of file '{0}'" -f $nextFile.File.Name + "`n" +
+            "    FullPath:     '{0}'" -f $nextFile.File.FullName + "`n" +
+            "    Size:         {0:N2} KB" -f ($nextFile.File.Length/1KB) + "`n" +
+            "    LastModified: {0:yyyy-MM-dd HH:mm:ss}" -f $nextFile.File.LastWriteTime
+        )
+
         # Send the automation request and capture the response
         $response = Send-BotAutomationRequest `
             -HubUri         $bot.Configuration.Endpoints.HubUri `
@@ -178,13 +185,13 @@ while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runne
         # Wait for the configured interval before the next iteration
         Wait-Interval `
             -IntervalTime $IntervalTime `
-            -Message "Next check scheduled at"
+            -Message "Next check scheduled at:"
     }
     catch {
         # Catch any unexpected errors, log a warning, and wait before retry
         Write-Log -Level Error -Message "(Main) $($_)" -UseColor
         Wait-Interval `
             -IntervalTime $IntervalTime `
-            -Message "Next check scheduled at"
+            -Message "Next check scheduled at:"
     }
 }

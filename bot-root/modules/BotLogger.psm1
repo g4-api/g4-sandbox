@@ -89,3 +89,9 @@ function Write-Log {
 }
 
 Export-ModuleMember -Function Write-Log
+
+<#
+WORK ITEMS
+
+[ ] - Add support for log level. Will be taken from .env file. Default will be information.
+#>

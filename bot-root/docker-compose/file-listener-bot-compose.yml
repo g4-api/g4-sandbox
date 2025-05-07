@@ -2,7 +2,7 @@ version: "3.8"
 
 configs:
   nginx_conf:
-    file: ./static-bot-compose-nginx.conf    # <-- must point to a real file
+    file: ./file-listener-bot-compose-nginx.conf    # <-- must point to a real file
 
 services:
   proxy:
@@ -11,7 +11,7 @@ services:
       - source: nginx_conf
         target: /etc/nginx/nginx.conf
     ports:
-      - "54252:80"
+      - "54253:80"
     networks:
       - backend
     deploy:
@@ -24,13 +24,13 @@ services:
         delay: 5s
         max_attempts: 0    # unlimited retries
 
-  g4-static-bot:
-    image: g4-static-bot:latest
+  g4-file-listener-bot:
+    image: g4-file-listener-bot:latest
     volumes:
       - C:/g4-bots-volume:/bots
     environment:
-      BOT_NAME:         "g4-static-bot"
-      CALLBACK_INGRESS: "http://host.docker.internal:54252"
+      BOT_NAME:         "g4-file-listener-bot"
+      CALLBACK_INGRESS: "http://host.docker.internal:54253"
       DRIVER_BINARIES:  "http://host.docker.internal:4444/wd/hub"
       HUB_URI:          "http://host.docker.internal:9944"
       INTERVAL_TIME:    "5"
@@ -42,9 +42,9 @@ services:
         kI9JkZQaCS3z9CdKUezu86FNYwkBdG1cnea3lf/FeO5xGa7SH9hNqeyMQeOOOAmwTiM6NeTd
         15WvjEXFEBsfA=
     expose:
-      - "54252"
+      - "54253"
     deploy:
-      replicas: 9
+      replicas: 1
       endpoint_mode: dnsrr
       restart_policy:
         condition: on-failure

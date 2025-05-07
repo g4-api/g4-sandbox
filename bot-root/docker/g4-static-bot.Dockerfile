@@ -12,7 +12,7 @@ ENV TERM=xterm
 
 # Install prerequisites
 RUN apt-get update && \
-    apt-get install -y wget apt-transport-https software-properties-common gnupgc curl && \
+    apt-get install -y wget apt-transport-https software-properties-common gnupg curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and install Microsoft repository GPG keys
