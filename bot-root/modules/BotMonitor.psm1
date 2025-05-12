@@ -154,11 +154,11 @@ $startBotCallbackListener = {
 
     # Relay warnings from the runspace
     $powerShell.Streams.Warning.add_DataAdded({
-        param($sender, $eventArgs)
+        param($s, $e)
 
         $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
         [Console]::ForegroundColor = [ConsoleColor]::Yellow
-        [Console]::WriteLine("$($timestamp) - WRN: (Start-BotCallbackListener) $($sender[$eventArgs.Index].Message)")
+        [Console]::WriteLine("$($timestamp) - WRN: (Start-BotCallbackListener) $($s[$e.Index].Message)")
         [Console]::ResetColor()
     })
 
@@ -166,10 +166,10 @@ $startBotCallbackListener = {
     if ($InformationPreference -eq 'Continue') {
         # Relay informational messages from the runspace
         $powerShell.Streams.Information.add_DataAdded({
-            param($sender, $eventArgs)
+            param($s, $e)
 
             $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-            [Console]::WriteLine("$($timestamp) - INF: (Start-BotCallbackListener) $($sender[$eventArgs.Index].MessageData)")
+            [Console]::WriteLine("$($timestamp) - INF: (Start-BotCallbackListener) $($s[$e.Index].MessageData)")
         })
     }
 
@@ -233,6 +233,7 @@ $startBotCallbackListener = {
             # Always clean up the listener to free the port
             $listener.Stop()
             $listener.Close()
+            exit 0
         }
     })
 
@@ -383,8 +384,8 @@ $updateBot = {
 .NOTES
     - Depends on helper scriptblocks $registerBot and $startBotCallbackListener.
     - On success returns a PSCustomObject with properties:
-        * Runner      – the PowerShell runspace instance
-        * AsyncResult – the IAsyncResult token from BeginInvoke()
+        * Runner      ï¿½ the PowerShell runspace instance
+        * AsyncResult ï¿½ the IAsyncResult token from BeginInvoke()
 #>
 function Start-BotCallbackListener {
     [CmdletBinding()]
@@ -457,7 +458,7 @@ function Start-BotCallbackListener {
             return $callbackListenerJob
         }
 
-        # Otherwise, the listener failed to initialize—warn and retry
+        # Otherwise, the listener failed to initializeï¿½warn and retry
         Write-Log -Level Warning -Message "(Start-BotCallbackListener) Listener startup did not begin as expected." -UseColor
         Write-Log -Level Verbose -Message "(Start-BotCallbackListener) Retrying listener startup." -UseColor
         Start-Sleep -Seconds 1
@@ -466,7 +467,7 @@ function Start-BotCallbackListener {
     # Timeout reached without success
     Write-Log `
         -Level   Critical `
-        -Message "(Start-BotCallbackListener) Idle bots are not allowed. Bot failed to register within $($Timeout) seconds—please verify hub connectivity at '$($HubUri)' and retry." `
+        -Message "(Start-BotCallbackListener) Idle bots are not allowed. Bot failed to register within $($Timeout) secondsï¿½please verify hub connectivity at '$($HubUri)' and retry." `
         -UseColor
     if ($callbackListenerJob) {
         $callbackListenerJob.Dispose()
@@ -478,7 +479,7 @@ function Start-BotCallbackListener {
 
 <#
 .SYNOPSIS
-    Launches a background “watchdog” process to monitor and auto-register a bot.
+    Launches a background ï¿½watchdogï¿½ process to monitor and auto-register a bot.
 
 .DESCRIPTION
     Start-WatchDog creates an in-process PowerShell runspace that continuously:
@@ -566,11 +567,11 @@ function Start-BotWatchDog {
 
     # Relay warnings from the runspace
     $powerShell.Streams.Warning.add_DataAdded({
-        param($sender, $eventArgs)
+        param($s, $e)
 
         $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
         [Console]::ForegroundColor = [ConsoleColor]::Yellow
-        [Console]::WriteLine("$($timestamp) - WRN: (Start-BotWatchDog) $($sender[$eventArgs.Index].Message)")
+        [Console]::WriteLine("$($timestamp) - WRN: (Start-BotWatchDog) $($s[$e.Index].Message)")
         [Console]::ResetColor()
     })
 
@@ -578,10 +579,10 @@ function Start-BotWatchDog {
     if ($InformationPreference -eq 'Continue') {
         # Relay informational messages from the runspace
         $powerShell.Streams.Information.add_DataAdded({
-            param($sender, $eventArgs)
+            param($s, $e)
 
             $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-            [Console]::WriteLine("$($timestamp) - INF: (Start-BotWatchDog) $($sender[$eventArgs.Index].MessageData)")
+            [Console]::WriteLine("$($timestamp) - INF: (Start-BotWatchDog) $($s[$e.Index].MessageData)")
         })
     }
 
@@ -595,8 +596,6 @@ function Start-BotWatchDog {
             $BotType,            # Category/type of the bot
             $HubUri,             # Base URI of the central hub service
             $PollingInterval,    # Base interval (seconds) for polling/backoff
-            #$JoinUri,            # Scriptblock to normalize and join URIs
-            #$RegisterBot,        # Scriptblock to register the bot with the hub
             $ParentTask
         )
 
@@ -813,8 +812,6 @@ function Start-BotWatchDog {
     $powerShell.AddArgument($BotType)
     $powerShell.AddArgument($HubUri)
     $powerShell.AddArgument($PollingInterval)
-    #$powerShell.AddArgument($joinUri)
-    #$powerShell.AddArgument($registerBot)
     $powerShell.AddArgument($ParentTask)
 
     # Start the runspace asynchronously, capturing the IAsyncResult
@@ -839,7 +836,7 @@ function Start-BotWatchDog {
 
 .DESCRIPTION
     Update-BotStatus first checks the bot's current status via the Test-BotConnection helper.
-    If the bot is not in “READY” or “WORKING” states, it emits a warning and does nothing.
+    If the bot is not in ï¿½READYï¿½ or ï¿½WORKINGï¿½ states, it emits a warning and does nothing.
     Otherwise, it calls the Update-Bot helper to send an HTTP PUT updating the bot's status.
 
 .PARAMETER BotId

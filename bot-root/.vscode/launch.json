@@ -5,6 +5,26 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "PowerShell: Launch Static Http Listener",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "${workspaceFolder}/Start-HttpStaticListenerBot.ps1",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "-Base64ResponseContent 'eyJtZXNzYWdlIjoiRzQgSFRUUCBRdWVyeVN0cmluZyBMaXN0ZW5lciBCb3QgdjEuMCJ9'",
+                "-ContentType 'application/json; charset=utf-8'",
+                "-EntryPointIngress 'http://host.docker.internal:9213'",
+                "-EntryPointUri 'http://host.docker.internal:9213'",
+                "-BotVolume 'C:\\g4-bots-volume'",
+                "-BotName 'g4-http-listener-bot'",
+                "-CallbackIngress 'http://host.docker.internal:9213'",
+                "-CallbackUri 'http://host.docker.internal:9213'",
+                "-DriverBinaries 'http://host.docker.internal:4444/wd/hub'",
+                "-HubUri 'http://host.docker.internal:9944'",
+                "-Token 'rTIlEC3IPr/GYlpGp7CLvnKUJOVrkQ1EqHwd875LZgRn712dg1cnZLAWblDr6f/0Jc5LzyelEr5B7O4O3nZtKumTv4lXST78oM/hW8tCE40q97ZGjGX3oCVWjzj2t7jp9Jh9O0ynNm+WvJfmlQVPXdJLHIjetaIJJWfNZFKgbAFLPqKMIauUIaa2ytMq7lgjVASwKeZ4FRG6CyyfrcLmw6u886UmlpK01Cqa1qy7HQuaiTwXdyFnrY20NjU01rsCm0RRKti/76w9PKK6Cy7mgAkI9JkZQaCS3z9CdKUezu86FNYwkBdG1cnea3lf/FeO5xGa7SH9hNqeyMQeOOOAmwTiM6NeTd15WvjEXFEBsfA='"
+            ]
+        },
+        {
             "name": "PowerShell: Launch Current File",
             "type": "PowerShell",
             "request": "launch",

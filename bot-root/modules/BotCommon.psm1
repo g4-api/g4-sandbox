@@ -1,5 +1,9 @@
+# Change to the script's own directory so any relative paths resolve correctly
+Set-Location -Path $PSScriptRoot
+
 # Import the bot logger utility modules
-Import-Module './BotLogger.psm1' -Force
+Import-Module './BotLogger.psm1'    -Force
+Import-Module './BotUtilities.psm1' -Force
 
 # Scriptblock to find an available TCP port on the local loopback interface
 $getFreePort = {
@@ -54,9 +58,9 @@ $getRemoteIpv4 = {
 # but only if they aren't already set.
 $importEnvironment = {
     param(
-        $EnvironmentFilePath,            # Path to the UTF-8-encoded environment file
-        $SkipNames,                      # Array of variable names to exclude from import
-        $AdditionalEnvironmentVariables  # Array of extra "KEY=VALUE" strings to append
+        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"), # Default to ".env" in script folder
+        [string[]]$SkipNames                      = @(),                              # Names to omit from import
+        [string[]]$AdditionalEnvironmentVariables = @()                               # Extra KEY=VALUE pairs to include
     )
 
     # Ensure the file exists before proceeding
@@ -92,30 +96,18 @@ $importEnvironment = {
         }
 
         # If this variable is already set in this session (non-empty), skip it
-        if (-not [string]::IsNullOrEmpty("$($env):$($key)")) {
-            Write-Debug "Environment variable '$key' already set to '$($env):$($key)', skipping"
+        $existingValue = [System.Environment]::GetEnvironmentVariable($key)
+        if (-not [string]::IsNullOrEmpty($existingValue)) {
+            Write-Debug "Environment variable '$($key)' already set to '$($existingValue)', skipping"
             return
         }
         
         # Set the environment variable in this session
-        Set-Item -Path "Env:$key" -Value $value
+        Set-Item -Path "Env:$($key)" -Value $value
 
         # Log via Debug stream for visibility during -Debug preference
-        Write-Debug "Set environment variable '$key' to '$value'"
+        Write-Debug "Set environment variable '$($key)' to '$($value)'"
     }
-}
-
-# Scriptblock to join a base URI and a relative path into a single normalized URI with exactly one '/' separator
-$joinUri = {
-    param($Base, $Path)
-
-    # Trim any trailing slash from the base, trim any leading slash from the path,
-    # then combine with a single '/' separator.
-    $normalizedBase = $Base.TrimEnd('/')
-    $normalizedPath = $Path.TrimStart('/')
-
-    # Return the combined URI string
-    return "$($normalizedBase)/$($normalizedPath)"
 }
 
 # Checks if a specific TCP port is free on the local loopback interface
@@ -143,10 +135,13 @@ function New-BotConfiguration {
         [Parameter(Mandatory = $false)] [string] $BotName,
         [Parameter(Mandatory = $false)] [string] $BotType,
         [Parameter(Mandatory = $false)] [string] $BotVolume,
-        [Parameter(Mandatory = $false)] [string] $CallbackUri,
         [Parameter(Mandatory = $false)] [string] $CallbackIngress,
+        [Parameter(Mandatory = $false)] [string] $CallbackUri,
+        
         [Parameter(Mandatory = $false)] [string] $DriverBinaries,
-        [Parameter(Mandatory = $false)] [int]    $EntryPointPort,
+        [Parameter(Mandatory = $false)] [string] $EntryPointIngress,
+        [Parameter(Mandatory = $false)] [string] $EntryPointUri,
+
         [Parameter(Mandatory = $true)]  [string] $EnvironmentFilePath,
         [Parameter(Mandatory = $false)] [string] $HubUri,
         [Parameter(Mandatory = $false)] [int]    $RegistrationTimeout,
@@ -188,20 +183,11 @@ function New-BotConfiguration {
             return $null
         }
 
-        # Validate that the provided value is a valid URI object
-        try {
-            $uri = [Uri]::new($CallbackUri)
-        }
-        catch {
-            # If URI construction fails, treat as invalid
-            return $null
-        }
-
         # Get the URI scheme (http or https)
         $scheme = $CallbackUri.Scheme
 
         # Get the hostname (without port)
-        $host = $CallbackUri.Host
+        $botHost = $CallbackUri.Host
 
         # Determine port: if the original URI's port is non-positive, fetch a free one; otherwise use it
         $port = if (-not $CallbackUri.Port -or $CallbackUri.Port -le 0) {
@@ -213,7 +199,7 @@ function New-BotConfiguration {
 
         # Test if the CallbackUri's port is available
         $port = if (& $testPort -PortToTest $CallbackUri.Port) {
-            # Port is free—use the original CallbackUri port
+            # Port is freeï¿½use the original CallbackUri port
             $CallbackUri.Port
         }
         else {
@@ -226,10 +212,10 @@ function New-BotConfiguration {
         # - If port is default HTTP (80) or HTTPS (443), omit port.
         # - Otherwise include host:port.
         $authority = if (-not $port -or ($port -eq 80 -or $port -eq 443)) {
-            "$host"
+            "$($botHost)"
         }
         else {
-            "$($host):$port"
+            "$($botHost):$port"
         }
 
         # Combine scheme, authority, and bot path into the final URL
@@ -249,33 +235,58 @@ function New-BotConfiguration {
     $HubUri         = if(-not $HubUri)         { $env:G4_HUB_URI }       else { $HubUri }
     $Token          = if(-not $Token)          { $env:G4_LICENSE_TOKEN } else { $Token }
 
-    $saveResponse   = $env:SAVE_RESPONSE -match "(?i)^true$"
-    $saveErrors     = $env:SAVE_ERRORS   -match "(?i)^true$"
+    # Evaluate SAVE_RESPONSE as Boolean: accepts true, True, 'true', "True", etc.
+    $saveResponse = $env:SAVE_RESPONSE -match "^(?i)[`"']?true[`"']?$"
 
-    $botId                      = if([string]::IsNullOrEmpty($BotId)) { "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" } else { $BotId }
+    # Evaluate SAVE_ERRORS as Boolean: accepts true, True, 'true', "True", etc.
+    $saveErrors   = $env:SAVE_ERRORS   -match "^(?i)[`"']?true[`"']?$"
+
+
+    $BotId                      = if([string]::IsNullOrEmpty($BotId)) { "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" } else { $BotId }
     $ipv4                       = & $getRemoteIpv4
-    $defaultUri                 = [Uri]::new("http://$($ipv4):9213")
-    [Uri]$botCallbackUri        = if(-not [string]::IsNullOrEmpty($CallbackUri))     { [Uri]::new($CallbackUri) }     else { $defaultUri }
-    [Uri]$botCallbackIngress    = if(-not [string]::IsNullOrEmpty($CallbackIngress)) { [Uri]::new($CallbackIngress) } else { $defaultUri }
+    $defaultCallbackUri         = [Uri]::new("http://$($ipv4):9213")
+    $defaultEntryPointUri       = [Uri]::new("http://$($ipv4):9123")
+
+    [Uri]$botCallbackUri        = if(-not [string]::IsNullOrEmpty($CallbackUri))     { [Uri]::new($CallbackUri) }     else { $defaultCallbackUri }
+    [Uri]$botCallbackIngress    = if(-not [string]::IsNullOrEmpty($CallbackIngress)) { [Uri]::new($CallbackIngress) } else { $defaultCallbackUri }
     $botCallbackUriAbsolute     = & $formatCallback -CallbackUri $botCallbackUri     -BotId $botId
     $botCallbackIngressAbsolute = $botCallbackIngress.AbsoluteUri.TrimEnd('/')
+
+    [Uri]$botEntryPointUri        = if(-not [string]::IsNullOrEmpty($EntryPointUri))     { [Uri]::new($EntryPointUri) }     else { $defaultEntryPointUri }
+    [Uri]$botEntryPointIngress    = if(-not [string]::IsNullOrEmpty($EntryPointIngress)) { [Uri]::new($EntryPointIngress) } else { $defaultEntryPointUri }
+    $botEntryPointUriAbsolute     = & $formatCallback -EntryPointUri $botEntryPointUri     -BotId $botId
+    $botEntryPointIngressAbsolute = $botEntryPointIngress.AbsoluteUri.TrimEnd('/')
 
 
     #$botCallbackIngressAbsolute = if(-not [string]::IsNullOrEmpty($CallbackIngress)) { $botCallbackIngressAbsolute } else { $botCallbackUriAbsolute }
     #$botCallbackUriAbsolute     = if(-not [string]::IsNullOrEmpty($CallbackUri)) { $botCallbackUriAbsolute } else { $botCallbackIngressAbsolute }
     
-    
-    
     $callbackPort            = [Uri]::new($botCallbackIngressAbsolute).Port
-    $EntryPointPort          = & $convertToNumber -Number $env:G4_ENTRYPOINT_PORT      -DefaultValue 8090
+    $entryPointPort          = [Uri]::new($botEntryPointIngressAbsolute).Port
     $RegistrationTimeout     = & $convertToNumber -Number $env:G4_REGISTRATION_TIMEOUT -DefaultValue 60
     $WatchDogPollingInterval = & $convertToNumber -Number $env:G4_WATCHDOG_INTERVAL    -DefaultValue 60
 
     $BotType = if(-not $BotType) { 'generic-bot' } else { $BotType }
+
+    # Read and parse the automation JSON file
+    $botAutomationFile = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot', 'automation.json')
+    $botFileContent = if(Test-Path -Path $botAutomationFile) { [System.IO.File]::ReadAllText($botAutomationFile, [System.Text.Encoding]::UTF8) } else { '{ "driverParameters":{"driverBinaries":""},"authentication":{"token":""}}' }
+    $botFileJson    = ConvertFrom-Json $botFileContent
     
+    # Inject dynamic values: driver binaries URL and authentication token
+    $botFileJson.driverParameters.driverBinaries = $DriverBinaries
+    $botFileJson.authentication.token            = $Token
+    
+    # Serialize back to JSON and encode as Base64
+    $botFileContent = ConvertTo-Json $botFileJson -Depth 50 -Compress
+    $botBytes       = [System.Text.Encoding]::UTF8.GetBytes($botFileContent)
+    $botContent     = [System.Convert]::ToBase64String($botBytes)
+
     return @{
         Metadata = [PSCustomObject]@{
-            BotId   = $botId
+            BotBase64Content = $botContent
+            BotContentObject = $botFileJson
+            BotId   = $BotId
             BotName = $BotName
             BotType = $BotType
             IPv4    = $ipv4.IPAddressToString
@@ -283,21 +294,30 @@ function New-BotConfiguration {
         }
         
         Endpoints = [PSCustomObject]@{
-            Base64InvokeUri     = & $joinUri $HubUri '/api/v4/g4/automation/base64/invoke'
+            Base64InvokeUri     = Join-Uri $HubUri '/api/v4/g4/automation/base64/invoke'
+            
+            
             BotCallbackIngress  = $botCallbackIngressAbsolute
             BotCallbackPrefix   = "http://+:$($callbackPort)/bot/v1/monitor/$($botId)/"
             BotCallbackUri      = $botCallbackUriAbsolute
-            BotEntryPointPrefix = "http://+:$($EntryPointPort)/bot/v1/$($BotName)/"
-            BotEntryPointUri    = "http://$($ipv4):$($EntryPointPort)/bot/v1/$($BotName)"
+
+            BotEntryPointIngress = $botEntryPointIngressAbsolute
+            BotEntryPointPrefix = "http://+:$($entryPointPort)/bot/v1/$($BotName)/"
+            BotEntryPointUri    = $botEntryPointUriAbsolute
+
+            CallbackIngressPort = 0
             CallbackPort        = $callbackPort
-            DriverBinaries      = $DriverBinaries
-            HubUri              = $HubUri
+            
+            DriverBinaries        = $DriverBinaries
+            EntryPointIngressPort = 0
+            EntryPointPort        = $entryPointPort
+            HubUri                = $HubUri
         }
 
         Directories = [PSCustomObject]@{
             BotArchiveDirectory     = [System.IO.Path]::Combine($BotVolume, $BotName, "archive")
             BotAutomationDirectory  = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot')
-            BotAutomationFile       = [System.IO.Path]::Combine($BotVolume, $BotName, 'bot', 'automation.json')
+            BotAutomationFile       = $botAutomationFile
             BotDirectory            = [System.IO.Path]::Combine($BotVolume, $BotName)
             BotErrorsDirectory      = [System.IO.Path]::Combine($BotVolume, $BotName, "errors")
             BotInputDirectory       = [System.IO.Path]::Combine($BotVolume, $BotName, "input")
@@ -539,7 +559,7 @@ function Get-RemoteIPv4 {
     and sets them as environment variables for this session by delegating to the internal import scriptblock.
 
 .PARAMETER EnvironmentFilePath
-    Path to the UTF-8–encoded environment file to load. Defaults to ".env" in the same directory as this script.
+    Path to the UTF-8ï¿½encoded environment file to load. Defaults to ".env" in the same directory as this script.
 
 .PARAMETER SkipNames
     An array of variable names to exclude from import (case-sensitive).
@@ -575,51 +595,10 @@ function Import-EnvironmentVariablesFile {
 
 <#
 .SYNOPSIS
-    Joins a base URI and a path segment, ensuring exactly one slash between them.
-
-.DESCRIPTION
-    The Join-Uri function concatenates two string parts—a base URI and a relative path—
-    trimming any trailing slash from the base and any leading slash from the path,
-    then inserting a single slash between. This prevents double-slashes or missing
-    separators in constructed URIs.
-
-.PARAMETER Base
-    The base URI or URL prefix (e.g., "https://example.com/api").
-
-.PARAMETER Path
-    The relative segment or resource path to append (e.g., "/v1/items").
-
-.EXAMPLE
-    PS> Join-Uri -Base "https://hub.example.com/" -Path "/api/v4/ping"
-    https://hub.example.com/api/v4/ping
-
-.NOTES
-    - Both inputs are mandatory and must not be null or empty.
-    - Does not validate that the resulting URI is well-formed; use [uri] casting if needed.
-#>
-function Join-Uri {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string] $Base,
-
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string] $Path
-    )
-
-    # Invoke the previously defined $joinUri script-block with $Base and $Path,
-    # then return its result as this function's output.
-    return & $joinUri $Base $Path
-}
-
-<#
-.SYNOPSIS
     Sends a base64-encoded automation payload to the bot automation endpoint, capturing even HTTP 4xx/5xx responses.
 
 .DESCRIPTION
-    Constructs the full “invoke” URI by joining the hub base URI with the automation path,
+    Constructs the full ï¿½invokeï¿½ URI by joining the hub base URI with the automation path,
     then posts the Base64Request string as plain text using Invoke-WebRequest.  
     Catches System.Net.WebException to extract the HTTP status code and response body
     when the server returns error codes (e.g. 500), and always returns a PSCustomObject
@@ -646,100 +625,137 @@ function Join-Uri {
 function Send-BotAutomationRequest {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string] $HubUri,         # Base URI of the hub service
-        [Parameter(Mandatory)][string] $Base64Request   # Base64-encoded automation payload to POST
+        [Parameter(Mandatory)][string] $HubUri,       # Base URI of the automation hub.
+        [Parameter(Mandatory)][string] $Base64Request # Base64-encoded request payload.
     )
 
-    # Normalize the base URI and append the automation invoke path
-    $uri = & $joinUri -Base $HubUri -Path "/api/v4/g4/automation/base64/invoke"
+    # Suppress progress output.
+    $ProgressPreference = 'SilentlyContinue'
 
-    # Format an exception into a standardized error response object (HTTP 500 fallback).
+    # Formats a detailed error response for HTTP 500 Internal Server Errors.
     $formatError500 = {
-        param(
-            $Exception  # The caught exception object from a failed request
-        )
+        param([Exception]$Exception, [string]$Uri)
 
-        # Emit a warning indicating an unexpected error occurred, including the exception message
-        Write-Log -Level Warning -Message "(Send-BotAutomationRequest) Unexpected error sending request to '$uri': $($Exception.Message)" -UseColor
+        $baseException = $Exception.GetBaseException()
 
-        # Build a hashtable containing the error message and full stack trace
+        # Emit a warning with the exception details.
+        Write-Log -Level Warning -Message "(Send-BotAutomationRequest) Unexpected error sending request to '$($Uri)': $($baseException.Message)" -UseColor
+
+        # Create error info hashtable.
         $errorInfo = @{
-            message = $Exception.Message      # Exception message text
-            stack   = $Exception.StackTrace   # Full stack trace for debugging
+            message = $baseException.Message
+            stack   = $baseException.StackTrace
         }
+        $content = $errorInfo | ConvertTo-Json -Depth 5 -Compress
 
-        # Return a PSCustomObject with serialized JSON, status code, and raw error info
+        # Return structured error response.
         return [PSCustomObject]@{
-            JsonValue  = $errorInfo | ConvertTo-Json -Depth 5 -Compress 
-            StatusCode = 500
-            Value      = $errorInfo 
+            Base64Content = ([System.Convert]::ToBase64String(([System.Text.Encoding]::UTF8.GetBytes($content))))
+            ContentType   = "application/json; charset=utf-8"
+            JsonValue     = $content
+            StatusCode    = @('500')
+            Value         = $errorInfo
         }
     }
 
-    try {
-        # Send the Base64 payload as text/plain, treating HTTP >= 400 as terminating
-        $response = Invoke-WebRequest `
-            -Uri         $uri `
-            -Method      Post `
-            -Body        $Base64Request `
-            -ContentType "text/plain" `
-            -ErrorAction Stop
+    # Constructs the result object from HTTP response.
+    $newResult = {
+        param($StatusCode, [string]$Content)
 
-        # Extract status code and response body
-        $statusCode = $response.StatusCode
-        $content    = $response.Content
-
-        # Attempt to parse JSON; if parsing fails, leave $parsed as $null
         $parsed = $null
+        try { $parsed = $Content | ConvertFrom-Json -ErrorAction Stop } catch {}
+
+        # Return structured success/error response.
+        return [PSCustomObject]@{
+            Base64Content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Content))
+            ContentType   = "application/json; charset=utf-8"
+            JsonValue     = $Content
+            StatusCode    = $StatusCode
+            Value         = if ($parsed) { $parsed } else { $Content }
+        }
+    }
+
+    # Performs HTTP request using PowerShell 5.1 semantics.
+    $invokePs5 = {
+        param($Uri, $Base64Request)
+
+        # Invoke HTTP request and handle WebException for non-2xx responses.
         try {
-            $parsed = $content | ConvertFrom-Json -ErrorAction Stop
+            $response = Invoke-WebRequest `
+              -Uri         $Uri `
+              -Method      Post `
+              -Body        $Base64Request `
+              -ContentType 'text/plain' `
+              -ErrorAction Stop
+
+            # Return successful response.
+            return & $newResult -StatusCode @("$($response.StatusCode)") -Content $response.Content
         }
         catch {
-            # non-JSON response, ignore parse error
-        }
+            $exception = $_.Exception.GetBaseException()
+            $exceptionName = $exception.GetType().Name
 
-        # Return the response object, choosing parsed if available, else raw content
-        return [PSCustomObject]@{
-            JsonValue  = $content
-            StatusCode = $statusCode
-            Value      = $(if ($parsed -ne $null) { $parsed } else { $content })
+            # Handle unexpected exceptions.
+            if (-not ($exceptionName -eq 'WebException' -and $exception.Response)) {
+                return & $formatError500 -Exception $exception -Uri $Uri
+            }
+
+            # Read response content from WebException.
+            $webResponse = $exception.Response
+            $content     = [IO.StreamReader]::new($webResponse.GetResponseStream()).ReadToEnd()
+
+            # Return error response from caught exception.
+            return & $newResult -StatusCode @([int]$webResponse.StatusCode) -Content $content
         }
     }
-    catch [System.Net.WebException] {
-        # Handle HTTP errors (4xx/5xx) thrown as WebException
-        $webResponse = $_.Exception.Response  # Extract the underlying HTTP response, if any
 
-        # If no HTTP response available—use generic 500 formatter
-        if ($null -eq $webResponse) {
-            return & $formatError500 -Exception $_.Exception
-        }
+    # Performs HTTP request using PowerShell 7+ semantics.
+    $invokePs7 = {
+        param($Uri, $Base64Request)
 
-        # Convert the StatusCode enum to an integer (e.g. 404, 500)
-        $statusCode = [int]$webResponse.StatusCode
+        # Clear previous error and response variables.
+        Remove-Variable networkError -ErrorAction SilentlyContinue
+        Remove-Variable response     -ErrorAction SilentlyContinue
 
-        # Read the entire response body as a string
-        $content = [System.IO.StreamReader]::new($webResponse.GetResponseStream()).ReadToEnd()
-
-        # Attempt to parse the body as JSON; if it fails, leave $parsed as $null
-        $parsed = $null
         try {
-            $parsed = $content | ConvertFrom-Json -ErrorAction Stop
+            # Invoke HTTP request without automatic HTTP error throwing.
+            Invoke-WebRequest `
+              -Uri                      $Uri `
+              -Method                   Post `
+              -Body                     $Base64Request `
+              -ContentType              'text/plain' `
+              -ErrorAction              Continue `
+              -ErrorVariable            networkError `
+              -OutVariable              response `
+              -ConnectionTimeoutSeconds 30 `
+              -SkipHttpErrorCheck
         }
         catch {
-            # Non-JSON response—ignore parse errors
+            # Handle low-level network exceptions (DNS, socket).
+            return & $formatError500 -Exception $_.Exception -Uri $Uri
         }
 
-        # Return a PSCustomObject with raw JSON, status code, and either the parsed object or raw text
-        return [PSCustomObject]@{
-            JsonValue  = $content
-            StatusCode = $statusCode
-            Value      = if ($parsed -ne $null) { $parsed } else { $content }
+        # Handle HTTP-level errors caught in ErrorVariable.
+        if ($networkError) {
+            return & $formatError500 -Exception $networkError[-1].Exception -Uri $Uri
         }
+
+        # Convert HTTP response bytes to string.
+        $webResponse = $response[-1]
+        $content = [System.Text.Encoding]::UTF8.GetString($webResponse.Content)
+
+        # Return HTTP response.
+        return & $newResult -StatusCode $webResponse.StatusCode -Content $content
     }
-    catch {
-        # Catch-all for any other exception types—format as a generic 500 error
-        return & $formatError500 -Exception $_.Exception
+
+    # Build the complete automation URI.
+    $automationUri = Join-Uri -Base $HubUri -Path "/api/v4/g4/automation/base64/invoke"
+
+    # Invoke using appropriate method based on PowerShell version.
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        return & $invokePs7 -Uri $automationUri -Base64Request $Base64Request
     }
+    return & $invokePs5 -Uri $automationUri -Base64Request $Base64Request
 }
 
 <#
@@ -751,7 +767,7 @@ function Send-BotAutomationRequest {
     If the file is missing, it writes a warning and returns $false.
 
 .PARAMETER BotFilePath
-    The full path to the file to verify (e.g. “C:\bots\mybot\automation.json”).
+    The full path to the file to verify (e.g. ï¿½C:\bots\mybot\automation.jsonï¿½).
 
 .EXAMPLE
     # Check for a specific file
@@ -847,6 +863,123 @@ function Wait-Interval {
     Start-Sleep -Seconds $IntervalTime
 }
 
+<#
+.SYNOPSIS
+    Writes an HTTP response, handling no-content and error-status cases.
+
+.DESCRIPTION
+    Decodes a Base64-encoded payload and writes it as the HTTP response body, setting
+    Content-Type, Content-Length, and Status Code.  
+    - If there is no payload and the status code is <= 204, returns 204 No Content.  
+    - If there is no payload and the status code is >= 400, returns the given error code with no body.
+
+.PARAMETER Response
+    The System.Net.HttpListenerResponse instance to which the function will write.
+
+.PARAMETER Base64ResponseContent
+    The response body encoded as a Base64 string. Optional for no-content or error responses.
+
+.PARAMETER ContentType
+    The MIME type for the response (default: 'application/json; charset=utf-8').
+
+.PARAMETER StatusCode
+    The HTTP status code to return (default: 200).  
+    - <= 204 with no body > 204 No Content  
+    - >= 400 with no body > returns provided error status with no body
+
+.EXAMPLE
+    # Normal JSON response
+    Write-Response `
+        -Response $ctx.Response `
+        -Base64ResponseContent ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"ok":true}'))) `
+        -StatusCode 200
+
+.EXAMPLE
+    # No-content response
+    Write-Response `
+        -Response $ctx.Response `
+        -StatusCode 204
+
+.EXAMPLE
+    # Error response without body
+    Write-Response `
+        -Response $ctx.Response `
+        -StatusCode 404
+
+.NOTES
+    - Always closes the response stream to complete the HTTP exchange.
+#>
+function Write-Response {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.Net.HttpListenerResponse] $Response,
+
+        [Parameter(Mandatory=$false)]
+        [string] $Base64ResponseContent,
+
+        [Parameter(Mandatory=$false)]
+        [string] $ContentType = "application/json; charset=utf-8",
+
+        [Parameter(Mandatory=$false)]
+        [int] $StatusCode = 200
+    )
+
+    try {
+        # If no body and status <= 204, return 204 No Content immediately
+        if ([string]::IsNullOrEmpty($Base64ResponseContent) -and $StatusCode -le 204) {
+            $Response.StatusCode      = 204
+            $Response.ContentLength64 = 0
+            return
+        }
+
+        # If no body and status >= 400, return the error status with no content
+        if ([string]::IsNullOrEmpty($Base64ResponseContent) -and $StatusCode -ge 400) {
+            $Response.StatusCode      = $StatusCode
+            $Response.ContentLength64 = 0
+            return
+        }
+
+        # Decode the Base64 payload into a UTF-8 string
+        $decodedContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Base64ResponseContent))
+
+        # Convert the UTF-8 string into a byte array for writing
+        $buffer = [System.Text.Encoding]::UTF8.GetBytes($decodedContent)
+
+        # Set headers for a normal (non-error) response
+        $Response.ContentLength64 = $buffer.Length
+        $Response.ContentType     = $ContentType
+        $Response.StatusCode      = $StatusCode
+
+        # Buffer is readyï¿½body will be written in the finally block
+    }
+    catch {
+        # Build a JSON object with error details
+        $errorObject = @{
+            error   = $_.Exception.GetBaseException().StackTrace
+            message = $_.Exception.GetBaseException().Message
+        } | ConvertTo-Json -Depth 5 -Compress
+
+        # Encode the error JSON into bytes
+        $buffer = [System.Text.Encoding]::UTF8.GetBytes($errorObject)
+
+        # Populate response headers for an internal server error
+        $Response.ContentLength64 = $buffer.Length
+        $Response.ContentType      = "application/json; charset=utf-8"
+        $Response.StatusCode       = 500
+
+        # Log a warning with the error message
+        Write-Warning "Error writing response: $($_.Exception.GetBaseException().Message)"
+    }
+    finally {
+        # Write whatever is in $buffer (normal body or error JSON) and close the stream
+        if ($Response -and $Response.OutputStream) {
+            $Response.OutputStream.Write($buffer, 0, $buffer.Length)
+            $Response.OutputStream.Close()
+        }
+    }
+}
+
 Export-ModuleMember -Function Get-FreePort
 Export-ModuleMember -Function Get-RemoteIPv4
 Export-ModuleMember -Function Get-NextFile
@@ -857,3 +990,4 @@ Export-ModuleMember -Function Send-BotAutomationRequest
 Export-ModuleMember -Function Test-BotFile
 Export-ModuleMember -Function Test-Port
 Export-ModuleMember -Function Wait-Interval
+Export-ModuleMember -Function Write-Response

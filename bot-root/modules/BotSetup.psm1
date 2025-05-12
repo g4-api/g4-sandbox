@@ -10,9 +10,9 @@ Import-Module './BotCommon.psm1'  -Force
     Initializes a bot by building its configuration, starting its callback listener, and launching a watchdog.
 
 .DESCRIPTION
-    Initialize-Bot constructs the bot’s runtime configuration (endpoints, metadata, and timeouts) via 
+    Initialize-Bot constructs the bot's runtime configuration (endpoints, metadata, and timeouts) via 
     New-BotConfiguration, then:
-      1. Starts the bot’s HTTP callback listener in a background runspace using Start-BotCallbackListener.
+      1. Starts the bot's HTTP callback listener in a background runspace using Start-BotCallbackListener.
       2. Launches a watchdog loop with Start-BotWatchDog to monitor and re-register the bot until the listener finishes.
     Returns a PSCustomObject containing the configuration and handles to both background jobs.
 
@@ -23,13 +23,13 @@ Import-Module './BotCommon.psm1'  -Force
     The category or type of the bot (e.g. "static-bot", "worker").
 
 .PARAMETER BotVolume
-    The path to the bot’s working volume or directory.
+    The path to the bot's working volume or directory.
 
 .PARAMETER CallbackPort
-    (Optional) TCP port for the bot’s callback listener. If omitted, a free port will be chosen.
+    (Optional) TCP port for the bot's callback listener. If omitted, a free port will be chosen.
 
 .PARAMETER EntryPointPort
-    (Optional) TCP port for the bot’s main entry-point service. If omitted, a free port will be chosen.
+    (Optional) TCP port for the bot's main entry-point service. If omitted, a free port will be chosen.
 
 .PARAMETER EnvironmentFilePath
     Path to the environment file (e.g. ".env") containing KEY=VALUE pairs to load before startup.
@@ -83,7 +83,7 @@ function Initialize-Bot {
         [Parameter(Mandatory = $false)] [int]    $WatchDogPollingInterval
     )
 
-    # 1) Build the bot’s configuration object (endpoints, metadata, timeouts)
+    # 1) Build the bot's configuration object (endpoints, metadata, timeouts)
     $BotConfiguration = New-BotConfiguration `
         -BotId                   $BotId `
         -BotName                 $BotName `

@@ -1,0 +1,5 @@
+docker swarm init
+docker swarm update --task-history-limit=0
+docker stack deploy --compose-file static-http-listener-bot-compose.yml static-http-listener-bots
+docker service scale static-http-listener-bots_bot=5
+docker stack rm static-http-listener-bots

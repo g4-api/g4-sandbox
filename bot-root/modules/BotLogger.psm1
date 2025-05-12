@@ -6,14 +6,14 @@
     Write-Log emits lines prefixed with an ISO 8601 UTC timestamp, a three-letter level code, and your message, e.g.:
         2025-05-02T12:34:56.789Z - INF: Service started.
     You specify the full level name (Information, Warning, Error, Debug, Verbose, Critical),
-    and internally it’s mapped to a three-letter code.  
+    and internally it's mapped to a three-letter code.  
     When -UseColor is specified, it uses distinct console colors for each level:
-      • INF > (no color; uses default console color)
-      • WRN > Yellow
-      • ERR > Red
-      • DBG > DarkGray
-      • VRB > Cyan
-      • CRT > DarkRed
+      INF > (no color; uses default console color)
+      WRN > Yellow
+      ERR > Red
+      DBG > DarkGray
+      VRB > Cyan
+      CRT > DarkRed
 
 .PARAMETER Level
     The full log level name. Must be one of:

@@ -35,7 +35,6 @@ $botConfiguration = New-BotConfiguration `
     -CallbackIngress     $CallbackIngress `
     -CallbackUri         $CallbackUri `
     -DriverBinaries      $DriverBinaries `
-    -EntryPointPort      $EntryPointPort `
     -EnvironmentFilePath (Join-Path $PSScriptRoot ".env") `
     -HubUri              $HubUri `
     -Token               $Token
@@ -73,15 +72,13 @@ if ($Docker) {
         Write-Log -Level Verbose -UseColor -Message "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
         $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
         $process.WaitForExit(60000)
-
-        # Exit successfully if no errors
-        Exit 0
     }
     catch {
-        # Exit with error code
         # Report error details on failure
         Write-Log -Level Critical -UseColor -Message "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
-        Exit 1
+    }
+    finally{
+        Exit 0
     }
 }
 
@@ -90,7 +87,7 @@ $bot = Initialize-BotByConfiguration -BotConfiguration $botConfiguration
 
 # Display startup message and instructions
 Write-Host
-Write-Host "Starting main bot loop.`nPress [Ctrl] + [C] to stop bot.`n"
+Write-Host "Starting bot '$($BotName)' loop with '$($IntervalTime)' seconds interval.`nPress [Ctrl] + [C] to stop bot.`n"
 
 # Loop until the callback listener runspace completes
 while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runner.InvocationStateInfo.State -eq 'Running') {
@@ -155,7 +152,7 @@ while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runne
     }
     catch {
         # Catch any unexpected errors, log a warning, and wait before retry
-        Write-Log -Level Error -Message "(Main) $($_)" -UseColor
+        Write-Log -Level Error -Message "(Start-StaticBot) $($_)" -UseColor
         Wait-Interval `
             -IntervalTime $IntervalTime `
             -Message "Next bot invocation scheduled at"

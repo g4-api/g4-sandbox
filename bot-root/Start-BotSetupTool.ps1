@@ -22,7 +22,7 @@ $commonParameters = @(
     [ordered]@{
         Default          = "g4-bot"
         Description      = "The name of the bot."
-        EnvironmentValue = $botConfiguration.Directories.BotName
+        EnvironmentValue = $botConfiguration.Metadata.BotName
         Mandatory        = $true
         Name             = "BotName"
         Type             = "String"
@@ -875,7 +875,7 @@ function Show-UpdateDriverSubmenu {
             # Execute the corresponding update script.
             try {
                 # Start the process using the determined shell.
-                $process = Start-Process -FilePath $shell -ArgumentList $selectedOption.Script -PassThru
+                Start-Process -FilePath $shell -ArgumentList $selectedOption.Script
             }
             catch {
                 Write-Host "Error executing script $($selectedOption.Script): $($_.Exception.GetBaseException().Message)" -ForegroundColor Red
@@ -1043,9 +1043,6 @@ function Show-UtilitiesSubmenu {
             HasInput= $true
         }
     )
-
-    # Determine the appropriate shell to use based on the operating system.
-    $shell = Resolve-Shell
 
     # Begin an infinite loop to display the submenu until the user chooses to go back.
     while ($true) {
@@ -1530,86 +1527,38 @@ function Start-HttpListenerBotWizard {
     # Each ordered hashtable ensures that keys appear in the following order: Default, Description, Mandatory, Name.
     $wizardParameters = @(
         [ordered]@{
-            Default          = ""
-            Description      = "The root directory where the bot will operate."
-            EnvironmentValue = $env:BOT_VOLUME
-            Mandatory        = $true
-            Name             = "BotVolume"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "g4-http-listener-bot"
-            Description      = "The name of the bot."
-            EnvironmentValue = $env:HTTP_LISTENER_BOT_NAME
-            Mandatory        = $true
-            Name             = "BotName"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = 8080
-            Description      = "The port on which the HTTP POST listener will run."
-            EnvironmentValue = $env:HOST_PORT
-            Mandatory        = $false
-            Name             = "HostPort"
-            Type             = "Number"
-        },
-        [ordered]@{
-            Default          = "application/json; charset=utf-8"
-            Description      = "The HTTP Content-Type header value."
-            EnvironmentValue = $env:CONTENT_TYPE
-            Mandatory        = $false
-            Name             = "ContentType"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "http://localhost:4444/wd/hub"
-            Description      = "The directory where the drivers are located or the grid endpoint."
-            EnvironmentValue = $env:DRIVER_BINARIES
-            Mandatory        = $true
-            Name             = "DriverBinaries"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "http://localhost:9944"
-            Description      = "The base URI of the G4 Hub endpoint to which automation configurations are sent."
-            EnvironmentValue = $env:G4_HUB_URI
-            Mandatory        = $true
-            Name             = "HubUri"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = 'eyJtZXNzYWdlIjogInN1Y2Nlc3MifQ=='
-            Description      = "The default HTTP response content (e.g., 'eyJtZXNzYWdlIjogInN1Y2Nlc3MifQ==')."
+            Default          = "eyJtZXNzYWdlIjoic3VjY2VzcyJ9"
+            Description      = "The response body payload, encoded in Base64. If omitted and StatusCode <= 204 or >= 400, no body will be sent."
             EnvironmentValue = $env:BASE64_RESPONSE_CONTENT
             Mandatory        = $false
             Name             = "Base64ResponseContent"
-            Type             = "String"
+            Type             = "string"
         },
         [ordered]@{
-            Default          = ""
-            Description      = "The authentication token (G4 License token) required to access the G4 Hub."
-            EnvironmentValue = $env:G4_LICENSE_TOKEN
-            Mandatory        = $true
-            Name             = "Token"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = $false
-            Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
-            EnvironmentValue = $null
+            Default          = "application/json; charset=utf-8"
+            Description      = "The MIME type (including charset) to set on the HTTP response. Defaults to JSON UTF-8."
+            EnvironmentValue = $env:CONTENT_TYPE
             Mandatory        = $false
-            Name             = "Docker"
-            Type             = "Switch"
+            Name             = "ContentType"
+            Type             = "string"
         },
         [ordered]@{
-            Default          = "Normal"
-            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
-            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
+            Default          = $null
+            Description      = "The external ingress host and port (scheme://host:port) used to route client traffic to the bot's base URI."
+            EnvironmentValue = $env:ENTRY_POINT_INGRESS
             Mandatory        = $false
-            Name             = "WindowStyle"
-            Type             = "String"
+            Name             = "EntryPointIngress"
+            Type             = "string"
+        },
+        [ordered]@{
+            Default          = $null
+            Description      = "The bot's base public URI (scheme://host:port) for client interactions."
+            EnvironmentValue = $env:ENTRY_POINT_URI
+            Mandatory        = $false
+            Name             = "EntryPointUri"
+            Type             = "string"
         }
-    )
+    ) + $commonParameters
 
     # Invoke the wizard interface to collect parameters and launch the HTTP Listener Bot.
     Show-Wizard `

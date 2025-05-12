@@ -36,7 +36,6 @@ $botConfiguration = New-BotConfiguration `
     -CallbackIngress     $CallbackIngress `
     -CallbackUri         $CallbackUri `
     -DriverBinaries      $DriverBinaries `
-    -EntryPointPort      $EntryPointPort `
     -EnvironmentFilePath (Join-Path $PSScriptRoot ".env") `
     -HubUri              $HubUri `
     -Token               $Token
@@ -74,15 +73,13 @@ if ($Docker) {
         Write-Log -Level Verbose -UseColor -Message "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
         $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
         $process.WaitForExit(60000)
-
-        # Exit successfully if no errors
-        Exit 0
     }
     catch {
-        # Exit with error code
         # Report error details on failure
         Write-Log -Level Critical -UseColor -Message "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
-        Exit 1
+    }
+    finally{
+        Exit 0
     }
 }
 
@@ -92,7 +89,7 @@ $inputDirectory = $bot.Configuration.Directories.BotInputDirectory
 
 # Display startup message and instructions
 Write-Host
-Write-Host "Listening for incoming files for bot '$($BotName)' in directory '$($inputDirectory)'.`nPress [Ctrl] + [C] to stop the script.`n"
+Write-Host "Listening for incoming files for bot '$($BotName)' in directory '$($inputDirectory)'.`nPress [Ctrl] + [C] to stop the bot.`n"
 
 # Loop until the callback listener runspace completes
 while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runner.InvocationStateInfo.State -eq 'Running') {
@@ -144,7 +141,7 @@ while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runne
         $botFileJson.authentication.token            = $bot.Configuration.Metadata.Token
 
         # Serialize back to JSON and encode as Base64
-        $botFileContent = ConvertTo-Json $botFileJson -Depth 50
+        $botFileContent = ConvertTo-Json $botFileJson -Depth 50 -Compress
         $botBytes       = [System.Text.Encoding]::UTF8.GetBytes($botFileContent)
         $botContent     = [System.Convert]::ToBase64String($botBytes)
 
@@ -155,7 +152,7 @@ while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runne
             -Status "Working" | Out-Null
 
         Write-Log -UseColor -Level Verbose -Message (
-            "(Main) Starting processing of file '{0}'" -f $nextFile.File.Name + "`n" +
+            "(Start-FileListenerBot) Starting processing of file '{0}'" -f $nextFile.File.Name + "`n" +
             "    FullPath:     '{0}'" -f $nextFile.File.FullName + "`n" +
             "    Size:         {0:N2} KB" -f ($nextFile.File.Length/1KB) + "`n" +
             "    LastModified: {0:yyyy-MM-dd HH:mm:ss}" -f $nextFile.File.LastWriteTime
@@ -189,7 +186,7 @@ while (-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runne
     }
     catch {
         # Catch any unexpected errors, log a warning, and wait before retry
-        Write-Log -Level Error -Message "(Main) $($_)" -UseColor
+        Write-Log -Level Error -Message "(Start-FileListenerBot) $($_)" -UseColor
         Wait-Interval `
             -IntervalTime $IntervalTime `
             -Message "Next check scheduled at:"
