@@ -110,6 +110,53 @@ $importEnvironment = {
     }
 }
 
+# Creates a generic structured error object for HTTP-style error responses.
+$newGenericError = {
+    param(
+        $Exception,
+        $StatusCode,
+        $Title,
+        $Detail     = $Exception.Message,
+        $Controller = 'InvokeBase64',
+        $Action     = 'Automation',
+        $TraceId    = $(Get-Date -Format "yyyyMMdd-HHmmss-fffffff")
+    )
+
+    # Extract the name of the exception type (e.g., ArgumentNullException)
+    $exceptionType = $Exception.GetType().Name
+
+    # Get the full stack trace for debugging purposes
+    $stackTrace = $Exception.ToString()
+
+    # Construct a structured error object with all provided metadata
+    $errorObject = [PSCustomObject]@{
+        title   = $Title                        # Error title
+        status  = $StatusCode                   # HTTP status code
+        detail  = $Detail                       # Detailed message
+
+        # Errors dictionary, keyed by exception type, with stack trace as array
+        errors  = @{
+            $exceptionType = @($stackTrace)
+        }
+
+        # Route-related metadata (filtered to exclude nulls)
+        # Remove null/empty entries
+        routeData = @{
+            action     = $Action
+            controller = $Controller
+        }
+
+        # Unique trace ID for tracking
+        traceId = $TraceId
+    }
+
+    # Return both raw object and serialized JSON (compressed for response)
+    return @{
+        JsonValue = $errorObject | ConvertTo-Json -Depth 10 -Compress
+        Value     = $errorObject
+    }
+}
+
 # Checks if a specific TCP port is free on the local loopback interface
 $testPort = {
     param(
@@ -336,6 +383,54 @@ function New-BotConfiguration {
             WatchDogPollingInterval = $WatchDogPollingInterval
         }
     }
+}
+
+<#
+.SYNOPSIS
+    Creates a generic structured error object for HTTP-style error responses.
+
+.PARAMETER Exception
+    The exception object to extract the stack trace and message from.
+
+.PARAMETER StatusCode
+    The HTTP status code to associate with the error (e.g. 400, 403, 500).
+
+.PARAMETER Title
+    A short, human-readable title summarizing the error.
+
+.PARAMETER Detail
+    A more detailed explanation of the error (optional; defaults to Exception.Message).
+
+.PARAMETER Controller
+    The name of the controller involved (if applicable).
+
+.PARAMETER Action
+    The action method being executed (if applicable).
+
+.PARAMETER TraceId
+    Optional trace ID. If not supplied, it defaults to a timestamp-based ID.
+#>
+function New-GenericError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]  [Exception] $Exception,
+        [Parameter(Mandatory = $true)]  [int]       $StatusCode,
+        [Parameter(Mandatory = $true)]  [string]    $Title,
+        [Parameter(Mandatory = $false)] [string]    $Detail = $Exception.Message,
+        [Parameter(Mandatory = $false)] [string]    $Controller,
+        [Parameter(Mandatory = $false)] [string]    $Action,
+        [Parameter(Mandatory = $false)] [string]    $TraceId = $(Get-Date -Format "yyyyMMdd-HHmmss-fffffff")
+    )
+
+    # Return both raw object and serialized JSON (compressed for response)
+    return & $newGenericError `
+        -Exception  $Exception `
+        -StatusCode $StatusCode `
+        -Title      $Title `
+        -Detail     $Detail `
+        -Controller $Controller `
+        -Action     $Action `
+        -TraceId    $TraceId
 }
 
 <#
@@ -635,26 +730,40 @@ function Send-BotAutomationRequest {
     # Formats a detailed error response for HTTP 500 Internal Server Errors.
     $formatError500 = {
         param([Exception]$Exception, [string]$Uri)
+        try {
 
         $baseException = $Exception.GetBaseException()
 
         # Emit a warning with the exception details.
-        Write-Log -Level Warning -Message "(Send-BotAutomationRequest) Unexpected error sending request to '$($Uri)': $($baseException.Message)" -UseColor
+        Write-Log `
+            -Level    Warning `
+            -Message  "(Send-BotAutomationRequest) Unexpected error sending request to '$($Uri)': $($baseException.Message)" `
+            -UseColor
 
         # Create error info hashtable.
-        $errorInfo = @{
-            message = $baseException.Message
-            stack   = $baseException.StackTrace
-        }
-        $content = $errorInfo | ConvertTo-Json -Depth 5 -Compress
+        $errorInfo = & $newGenericError `
+            -Exception  $baseException `
+            -StatusCode 500 `
+            -Title      'Unexpected Error' `
+            -Detail     $baseException.Message `
+            -Controller 'Automation' `
+            -Action     'InvokeBase64' `
+            -TraceId    $(Get-Date -Format "yyyyMMdd-HHmmss-fffffff")
 
         # Return structured error response.
         return [PSCustomObject]@{
-            Base64Content = ([System.Convert]::ToBase64String(([System.Text.Encoding]::UTF8.GetBytes($content))))
+            Base64Content = ([System.Convert]::ToBase64String(([System.Text.Encoding]::UTF8.GetBytes($errorInfo.JsonValue))))
             ContentType   = "application/json; charset=utf-8"
-            JsonValue     = $content
+            JsonValue     = $errorInfo.JsonValue
             StatusCode    = @('500')
-            Value         = $errorInfo
+            Value         = $errorInfo.Value
+        }
+        }
+        catch{
+            Write-Log `
+                -Level    Warning `
+                -Message  "(Send-BotAutomationRequest) Unexpected error: $($_.Exception.GetBaseException().Message)" `
+                -UseColor 
         }
     }
 
@@ -729,33 +838,43 @@ function Send-BotAutomationRequest {
               -OutVariable              response `
               -ConnectionTimeoutSeconds 30 `
               -SkipHttpErrorCheck
+
+            # Handle HTTP-level errors caught in ErrorVariable.
+            if ($networkError) {
+                return & $formatError500 -Exception $networkError[-1].Exception -Uri $Uri
+            }
+
+            # Convert HTTP response bytes to string.
+            $webResponse  = $response[-1]
+            $memoryStream = New-Object System.IO.MemoryStream
+            $webResponse.RawContentStream.CopyTo($memoryStream)
+            
+            $bytes   = $memoryStream.ToArray()
+            $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+
+            # Return HTTP response.
+            return & $newResult -StatusCode $webResponse.StatusCode -Content $content
         }
         catch {
             # Handle low-level network exceptions (DNS, socket).
             return & $formatError500 -Exception $_.Exception -Uri $Uri
         }
-
-        # Handle HTTP-level errors caught in ErrorVariable.
-        if ($networkError) {
-            return & $formatError500 -Exception $networkError[-1].Exception -Uri $Uri
-        }
-
-        # Convert HTTP response bytes to string.
-        $webResponse = $response[-1]
-        $content = [System.Text.Encoding]::UTF8.GetString($webResponse.Content)
-
-        # Return HTTP response.
-        return & $newResult -StatusCode $webResponse.StatusCode -Content $content
     }
 
     # Build the complete automation URI.
     $automationUri = Join-Uri -Base $HubUri -Path "/api/v4/g4/automation/base64/invoke"
 
     # Invoke using appropriate method based on PowerShell version.
-    if ($PSVersionTable.PSVersion.Major -ge 7) {
-        return & $invokePs7 -Uri $automationUri -Base64Request $Base64Request
+    $responseObject = if($PSVersionTable.PSVersion.Major -ge 7) {
+        # Use the PowerShell 7+ invocation delegate if running on PS 7 or newer
+        & $invokePs7 -Uri $automationUri -Base64Request $Base64Request
+    } else {
+        # Use the PowerShell 5-compatible invocation delegate otherwise
+        & $invokePs5 -Uri $automationUri -Base64Request $Base64Request
     }
-    return & $invokePs5 -Uri $automationUri -Base64Request $Base64Request
+
+    # Return the result from the selected invocation method
+    return $responseObject
 }
 
 <#
@@ -950,8 +1069,6 @@ function Write-Response {
         $Response.ContentLength64 = $buffer.Length
         $Response.ContentType     = $ContentType
         $Response.StatusCode      = $StatusCode
-
-        # Buffer is ready�body will be written in the finally block
     }
     catch {
         # Build a JSON object with error details
@@ -964,7 +1081,7 @@ function Write-Response {
         $buffer = [System.Text.Encoding]::UTF8.GetBytes($errorObject)
 
         # Populate response headers for an internal server error
-        $Response.ContentLength64 = $buffer.Length
+        $Response.ContentLength64  = $buffer.Length
         $Response.ContentType      = "application/json; charset=utf-8"
         $Response.StatusCode       = 500
 

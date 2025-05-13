@@ -1,5 +1,5 @@
 param(
-    [string]$HubUri   = "http://host.k8s.internal/wd/hub",
+    [string]$HubUri   = "http://localhost:4444/wd/hub",
     [int]   $NodePort = 5554
 )
 

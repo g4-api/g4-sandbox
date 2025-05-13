@@ -55,7 +55,7 @@ if ($Docker) {
         $cmdLines = @(
             "run -d -v `"$($botConfiguration.Directories.BotVolume):/bots`""
             " -e BASE64_RESPONSE_CONTENT=`"$($Base64ResponseContent)`""
-            " -e BOT_ID=`"$($BotId)`""
+            " -e BOT_ID=`"$($botConfiguration.Metadata.BotId)`""
             " -e BOT_NAME=`"$($BotName)`""
             " -e CALLBACK_INGRESS=`"$($CallbackIngress)`""
             " -e CALLBACK_URI=`"$($CallbackUri)`""
@@ -131,7 +131,7 @@ $outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
 # Relay warnings from the runspace
 $powerShell.Streams.Warning.add_DataAdded({
         param($s, $e)
-
+        
         $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
         [Console]::ForegroundColor = [ConsoleColor]::Yellow
         [Console]::WriteLine("$($timestamp) - WRN: (Start-HttpStaticListenerBot) $($s[$e.Index].Message)")
@@ -233,7 +233,7 @@ $powerShell.AddScript({
             if ($request.QueryString.Count -gt 0) {
                 Write-Warning "Detected query string parameters. These parameters will be ignored by the listener"
             }
-        
+            
             # Notify the hub that the bot is working on a new request
             & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Working" | Out-Null
 
@@ -241,9 +241,9 @@ $powerShell.AddScript({
             $botResponse = & $SendBotAutomationRequest `
                 -HubUri         $HubUri `
                 -Base64Request  $BotBase64Content
-            
+
             # Normalize status code to a string array, even if it's just one item
-            $statusCodes = @($botResponse.StatusCode) | Where-Object { -not [string]::IsNullOrWhiteSpace("$($_)") }
+            $statusCodes = @(@($botResponse.StatusCode) | Where-Object { -not [string]::IsNullOrWhiteSpace("$($_)") })
 
             # Safely pick last valid status code
             if ($statusCodes.Length -gt 0) {
@@ -268,7 +268,7 @@ $powerShell.AddScript({
                 $bytes                 = [System.Text.Encoding]::UTF8.GetBytes($botResponse.JsonValue)
                 $Base64ResponseContent = [System.Convert]::ToBase64String($bytes)
             }
-        
+
             # If the bot succeeded and we should save responses, write to output file
             if ($botStatusCode -eq 200 -and $SaveResponse) {
                 Set-Content -Value $botResponse.JsonValue -Path $outputFilePath
@@ -293,25 +293,17 @@ $powerShell.AddScript({
         }
 
         # After loop exits, stop and close the listener
-        try {
-            $Listener.Stop()
-            $Listener.Close()
-        }
-        catch {
-            Write-Warning $_
-            # Notify the hub that the bot is now offline and cannot get new requests
-            & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Offline" | Out-Null
-
-            # Warn if shutdown fails
-            Write-Warning "The I/O operation has been aborted because of either a thread exit or an application request"
-        }
+        $Listener.Stop()
+        $Listener.Close()
     }
     catch {
-        Write-Warning $_
-        # Notify the hub that the bot is now offline and cannot get new requests
+        # Log the exception message as a warning
+        Write-Warning $Exception.Message
+    
+        # Notify the hub that the bot is now offline and cannot accept new requests
         & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Offline" | Out-Null
-
-        # Catch any unexpected error
+    
+        # Issue a specific warning indicating the I/O operation was aborted (common during thread exit or shutdown)
         Write-Warning "The I/O operation has been aborted because of either a thread exit or an application request"
     }
 }) | Out-Null

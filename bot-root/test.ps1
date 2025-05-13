@@ -1,52 +1,31 @@
-function New-Result {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)] [int] $StatusCode,
-        [Parameter(Mandatory)] [string] $Content
-    )
-    $parsed = $null
-    
-    try { $parsed = $Content | ConvertFrom-Json -ErrorAction Stop } catch {}
+$StatusCode = 200
+    $Base64ResponseContent = "eyJtZXNzYWdlIjoiRzQgSFRUUCBRdWVyeVN0cmluZyBMaXN0ZW5lciBCb3QgdjEuMCJ9"   
+        
+        
+        try{
+        # Decode the Base64 payload into a UTF-8 string
+        $decodedContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Base64ResponseContent))
 
-    return [PSCustomObject]@{
-        Base64Content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Content))
-        ContentType   = "application/json; charset=utf-8"
-        JsonValue     = $Content
-        StatusCode    = $StatusCode
-        Value         = if ($parsed) { $parsed } else { $Content }
+        # Convert the UTF-8 string into a byte array for writing
+        $buffer = [System.Text.Encoding]::UTF8.GetBytes($decodedContent)
+
+        # Set headers for a normal (non-error) response
+        $l = $buffer.Count
+        #$l = $buffer.Length
+        # Buffer is ready�body will be written in the finally block
     }
-}
+    catch {
+        # Build a JSON object with error details
+        $errorObject = @{
+            error   = $_.Exception.GetBaseException().StackTrace
+            message = $_.Exception.GetBaseException().Message
+        } | ConvertTo-Json -Depth 5 -Compress
 
-# Clear any old variable
-Remove-Variable response -ErrorAction SilentlyContinue
+        # Encode the error JSON into bytes
+        $buffer = [System.Text.Encoding]::UTF8.GetBytes($errorObject)
 
- $content = Get-Content -Path "/mnt/c/g4-bots-volume/g4-http-listener-bot/bot/automation.json"
- $bytes = [System.Text.Encoding]::UTF8.GetBytes($content)
- $Base64Request     = [System.Convert]::ToBase64String($bytes)
-
- # PowerShell Core: never throw on 4xx/5xx
-$r = Invoke-WebRequest `
-  -Uri                     "http://192.168.1.13:9944/api/v4/g4/automation/base64/invoke" `
-  -Method                  Post `
-  -Body                    $Base64Request `
-  -ContentType             'text/plain' `
-  -ErrorAction              Continue `
-  -ErrorVariable            networkError `
-  -SkipHttpErrorCheck `
-  -OutVariable              response `
-  -ConnectionTimeoutSeconds 30
-
-
-  if($networkError) {
-    Write-Host $networkError
-  }
-
-  if($response) {
-    Write-Host $response
-  }
-
-  $webResponse = $response[-1]
-
-  $content = [System.Text.Encoding]::UTF8.GetString($webResponse.Content)
-  $a = New-Result -StatusCode $webResponse.StatusCode -Content $content
-  $c=""
+        # Log a warning with the error message
+        Write-Warning "Error writing response: $($_.Exception.GetBaseException().Message)"
+    }
+    finally {
+    }

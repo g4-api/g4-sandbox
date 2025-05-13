@@ -1,5 +1,5 @@
 param(
-    [string]$HubUri = "http://host.k8s.internal:4444/wd/hub"
+    [string]$HubUri = "http://localhost:4444/wd/hub"
 )
 
 function Join-Paths {
