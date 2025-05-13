@@ -113,47 +113,50 @@ $importEnvironment = {
 # Creates a generic structured error object for HTTP-style error responses.
 $newGenericError = {
     param(
-        $Exception,
-        $StatusCode,
-        $Title,
-        $Detail     = $Exception.Message,
-        $Controller = 'InvokeBase64',
-        $Action     = 'Automation',
-        $TraceId    = $(Get-Date -Format "yyyyMMdd-HHmmss-fffffff")
+        $Exception,                                                  # The exception object to process
+        $StatusCode,                                                 # The HTTP status code to associate with the error
+        $Title,                                                      # A human-readable title for the error
+        $Detail     = $Exception.Message,                            # Optional detailed message; defaults to the exception message
+        $Controller = 'InvokeBase64',                                # Optional controller name (defaulted)
+        $Action     = 'Automation',                                  # Optional action name (defaulted)
+        $TraceId    = $(Get-Date -Format "yyyyMMdd-HHmmss-fffffff")  # Unique trace ID for diagnostics
     )
 
-    # Extract the name of the exception type (e.g., ArgumentNullException)
+    # Extract the name of the exception type (e.g., 'ArgumentNullException')
     $exceptionType = $Exception.GetType().Name
 
-    # Get the full stack trace for debugging purposes
+    # Get the complete string representation of the exception (including stack trace)
     $stackTrace = $Exception.ToString()
 
     # Construct a structured error object with all provided metadata
     $errorObject = [PSCustomObject]@{
-        title   = $Title                        # Error title
-        status  = $StatusCode                   # HTTP status code
-        detail  = $Detail                       # Detailed message
+        title   = $Title                         # Error title
+        status  = $StatusCode                    # HTTP status code
+        detail  = $Detail                        # Description or message of the error
 
-        # Errors dictionary, keyed by exception type, with stack trace as array
-        errors  = @{
-            $exceptionType = @($stackTrace)
+        errors  = @{                             # Dictionary of errors by exception type
+            $exceptionType = @($stackTrace)      # Stack trace included as a single-item array
         }
 
-        # Route-related metadata (filtered to exclude nulls)
-        # Remove null/empty entries
-        routeData = @{
-            action     = $Action
-            controller = $Controller
+        routeData = @{                           # Information about the route context
+            action     = $Action                 # Action name
+            controller = $Controller             # Controller name
         }
 
-        # Unique trace ID for tracking
-        traceId = $TraceId
+        traceId = $TraceId                       # Unique ID to trace the error
     }
 
-    # Return both raw object and serialized JSON (compressed for response)
+    # Convert the error object to JSON (compact format)
+    $jsonValue = $errorObject | ConvertTo-Json -Depth 10 -Compress
+
+    # Return the error in multiple formats:
+    # - Base64Value: base64-encoded UTF-8 JSON string
+    # - JsonValue: raw JSON string
+    # - Value: original object
     return @{
-        JsonValue = $errorObject | ConvertTo-Json -Depth 10 -Compress
-        Value     = $errorObject
+        Base64Value = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($jsonValue))
+        JsonValue   = $jsonValue
+        Value       = $errorObject
     }
 }
 
@@ -419,7 +422,7 @@ function New-GenericError {
         [Parameter(Mandatory = $false)] [string]    $Detail = $Exception.Message,
         [Parameter(Mandatory = $false)] [string]    $Controller,
         [Parameter(Mandatory = $false)] [string]    $Action,
-        [Parameter(Mandatory = $false)] [string]    $TraceId = $(Get-Date -Format "yyyyMMdd-HHmmss-fffffff")
+        [Parameter(Mandatory = $false)] [string]    $TraceId = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
     )
 
     # Return both raw object and serialized JSON (compressed for response)
@@ -1103,6 +1106,7 @@ Export-ModuleMember -Function Get-NextFile
 Export-ModuleMember -Function Import-EnvironmentVariablesFile
 Export-ModuleMember -Function Join-Uri
 Export-ModuleMember -Function New-BotConfiguration
+Export-ModuleMember -Function New-GenericError
 Export-ModuleMember -Function Send-BotAutomationRequest
 Export-ModuleMember -Function Test-BotFile
 Export-ModuleMember -Function Test-Port

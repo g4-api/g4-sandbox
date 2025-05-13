@@ -1,346 +1,499 @@
-<#
-.SYNOPSIS
-    Starts an HTTP listener bot for processing incoming requests.
-
-.DESCRIPTION
-    This script sets up an HTTP listener to handle incoming requests for a bot. It supports
-    query string parameters, processes them, and invokes the G4Bot automation process. The bot
-    can also be run inside a Docker container if the `-Docker` switch is specified.
-
-.PARAMETER BotVolume
-    The volume or base path where the bot directories are located.
-
-.PARAMETER BotName
-    The name of the bot, used to construct file paths and log filenames.
-
-.PARAMETER HostPort
-    The port on which the HTTP listener will run.
-
-.PARAMETER ContentType
-    The MIME type for the HTTP response (e.g., "application/json").
-
-.PARAMETER DriverBinaries
-    The driver binaries information to update in the configuration.
-
-.PARAMETER HubUri
-    The base URI of the hub to which the automation configuration is sent.
-
-.PARAMETER Base64ResponseContent
-    The default response content to return to the client.
-
-.PARAMETER Token
-    The authentication token used for updating the configuration.
-
-.PARAMETER Docker
-    A switch to indicate whether the bot should be run inside a Docker container.
-
-.EXAMPLE
-    Start-HttpQsListenerBot.ps1 -BotVolume "C:\Bots" -BotName "MyBot" -HostPort 8080 `
-        -ContentType "application/json" -DriverBinaries "http://host.docker.internal:4444/wd/hub" `
-        -HubUri "http://host.docker.internal:9944" -Base64ResponseContent "{}" -Token "my-token"
-
-    Starts the bot listener on port 8080 with the specified parameters.
-
-.EXAMPLE
-    Start-HttpQsListenerBot.ps1 -BotVolume "C:\Bots" -BotName "MyBot" -HostPort 8080 `
-        -ContentType "application/json" -DriverBinaries "http://host.docker.internal:4444/wd/hub" `
-        -HubUri "http://host.docker.internal:9944" -Base64ResponseContent "{}" -Token "my-token" -Docker
-
-    Runs the bot inside a Docker container with the specified parameters.
-#>
 param (
     [CmdletBinding()]
-    [Parameter(Mandatory = $true)] [string]$BotVolume,
-    [Parameter(Mandatory = $true)] [string]$BotName,
-    [Parameter(Mandatory = $false)][int]   $HostPort              = 8080,
-    [Parameter(Mandatory = $false)][string]$ContentType           = "application/json; charset=utf-8",
-    [Parameter(Mandatory = $true)] [string]$DriverBinaries,
-    [Parameter(Mandatory = $true)] [string]$HubUri,
-    [Parameter(Mandatory = $false)][string]$Base64ResponseContent = "eyJtZXNzYWdlIjoic3VjY2VzcyJ9",
-    [Parameter(Mandatory = $true)] [string]$Token,
-    [Parameter(Mandatory = $false)][switch]$Docker
+    [Parameter(Mandatory = $false)] [string] $Base64ResponseContent,
+    [Parameter(Mandatory = $false)] [string] $BotId,
+    [Parameter(Mandatory = $true)]  [string] $BotName,
+    [Parameter(Mandatory = $true)]  [string] $BotVolume,
+    [Parameter(Mandatory = $false)] [string] $CallbackIngress,
+    [Parameter(Mandatory = $false)] [string] $CallbackUri,
+    [Parameter(Mandatory = $false)] [string] $ContentType,
+    [Parameter(Mandatory = $true)]  [string] $DriverBinaries,
+    [Parameter(Mandatory = $false)] [string] $EntryPointIngress,
+    [Parameter(Mandatory = $false)] [string] $EntryPointUri,
+    [Parameter(Mandatory = $true)]  [string] $HubUri,
+    [Parameter(Mandatory = $false)] [string] $Token,
+    [Parameter(Mandatory = $false)] [switch] $Docker
 )
 
-function Format-Parameters {
-    <#
-    .SYNOPSIS
-        Converts a query string hash table into a PSObject with properties.
+# Change to the script's own directory so any relative paths resolve correctly
+Set-Location -Path $PSScriptRoot
 
-    .DESCRIPTION
-        This function takes a hash table of query string parameters and iterates over its keys,
-        adding each key as a NoteProperty to a new PSObject. The resulting object can then be used
-        to easily access parameter values.
+# Import the setup and common modules for bot initialization and utilities
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotSetup.psm1'))  -Force
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotLogger.psm1')) -Force
 
-    .PARAMETER QueryString
-        A hash table containing the query string parameters.
+# Return to the script directory (in case module import changed location)
+Set-Location -Path $PSScriptRoot
 
-    .OUTPUTS
-        A PSObject with properties corresponding to the keys in the query string.
-    #>
-    param(
-        $QueryString
-    )
+# Set default values
+$Base64ResponseContent = if([string]::IsNullOrEmpty($Base64ResponseContent)) { "eyJtZXNzYWdlIjoic3VjY2VzcyJ9" }    else { $Base64ResponseContent }
+$ContentType           = if([string]::IsNullOrEmpty($ContentType))           { "application/json; charset=utf-8" } else { $ContentType }
 
-    Write-Verbose "Initializing data object to store query string parameters."
+# Build the bot's configuration object (endpoints, metadata, timeouts)
+$botConfiguration = New-BotConfiguration `
+    -BotId               $BotId `
+    -BotName             $BotName `
+    -BotType             'static-http-bot' `
+    -BotVolume           $BotVolume `
+    -CallbackIngress     $CallbackIngress `
+    -CallbackUri         $CallbackUri `
+    -DriverBinaries      $DriverBinaries `
+    -EntryPointIngress   $EntryPointIngress `
+    -EntryPointUri       $EntryPointUri `
+    -EnvironmentFilePath (Join-Path $PSScriptRoot ".env") `
+    -HubUri              $HubUri `
+    -Token               $Token
+
+# Only proceed if Docker support is enabled
+if ($Docker) {
+    try {
+        #. $botLoggerModulePath
+        Write-Log -Level Verbose -UseColor -Message "Docker switch is enabled. Preparing to launch Docker container for bot '$($botConfiguration.Metadata.BotName)'."
+        Write-Log -Level Verbose -UseColor -Message "Building the Docker command from the specified parameters."
+
+        # Initialize an array of docker run arguments
+        $cmdLines = @(
+            "run -d -v `"$($botConfiguration.Directories.BotVolume):/bots`""
+            " -e BASE64_RESPONSE_CONTENT=`"$($Base64ResponseContent)`""
+            " -e BOT_ID=`"$($botConfiguration.Metadata.BotId)`""
+            " -e BOT_NAME=`"$($BotName)`""
+            " -e CALLBACK_INGRESS=`"$($CallbackIngress)`""
+            " -e CALLBACK_URI=`"$($CallbackUri)`""
+            " -e CONTENT_TYPE=`"$($ContentType)`""
+            " -e DRIVER_BINARIES=`"$($DriverBinaries)`""
+            " -e ENTRY_POINT_INGRESS=`"$($EntryPointIngress)`""
+            " -e ENTRY_POINT_URI=`"$($EntryPointUri)`""
+            " -e HUB_URI=`"$($HubUri)`""
+            " -e SAVE_ERRORS=`"$($botConfiguration.Settings.SaveErrors)`""
+            " -e SAVE_RESPONSE=`"$($botConfiguration.Settings.SaveResponse)`""
+            " -e TOKEN=`"$($Token)`""
+        )
+
+        # Optionally add SAVE_OUTPUT flag when requested
+        $cmdLines += if ($SaveOutput) { " -e SAVE_OUTPUT=`"true`"" }
+
+        # Publish port entry point port
+        $cmdLines += " -p $($botConfiguration.Endpoints.EntryPointPort):$($botConfiguration.Endpoints.EntryPointPort)"
+        
+        # Publish port and assign unique container name
+        $cmdLines += " -p $($botConfiguration.Endpoints.CallbackPort):$($botConfiguration.Endpoints.CallbackPort)"
+
+        # Set container name and tag
+        $cmdLines += " --name `"$($botConfiguration.Metadata.BotName)-$([guid]::NewGuid())`" g4-http-qs-listener-bot:latest"
+
+        # Combine the array of arguments into one continuous string
+        Write-Log -Level Verbose -UseColor -Message "Joining command parts into a single Docker command string."
+        $dockerCmd = $cmdLines -join [string]::Empty
+
+        # Wait up to 60 seconds for the container to start
+        Write-Log -Level Verbose -UseColor -Message "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
+        $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
+        $process.WaitForExit(60000)
+    }
+    catch {
+        # Report error details on failure
+        Write-Log -Level Critical -UseColor -Message "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
+        
+    }
+    finally{
+        Exit 1
+    }
+}
+
+# Build the bot configuration object with endpoints, metadata, and timeouts
+$bot               = Initialize-BotByConfiguration -BotConfiguration $botConfiguration
+$botBase64Content  = $botConfiguration.Metadata.BotBase64Content
+$botCalculatedName = $botConfiguration.Metadata.BotName
+$botEntryPoint     = $botConfiguration.Endpoints.BotEntryPointPrefix
+$errorsDirectory   = $botConfiguration.Directories.BotErrorsDirectory
+$instance          = $botConfiguration.Metadata.BotId
+$outputDirectory   = $botConfiguration.Directories.BotOutputDirectory
+$saveErrors        = $botConfiguration.Settings.SaveErrors
+$saveResponse      = $botConfiguration.Settings.SaveResponse
+
+# Definitions: grab the ScriptBlock for each function so they can be injected into a child runspace
+$formatParameters = {
+    param($QueryString)
+
+    # Initializing data object to store query string parameters.
     $dataObject = New-Object PSObject
     
-    Write-Verbose "Adding each query string parameter as a property to the data object."
+    # Adding each query string parameter as a property to the data object.
     foreach ($key in $QueryString.Keys) {
         $dataObject | Add-Member -MemberType NoteProperty -Name $key -Value $QueryString[$key]
     }
 
-    Write-Verbose "Successfully formatted query string parameters into a PSObject."
+    # Successfully formatted query string parameters into a PSObject.
     return $dataObject
 }
+$newGenericError          = (Get-Command -Name 'New-GenericError').ScriptBlock
+$sendBotAutomationRequest = (Get-Command -Name 'Send-BotAutomationRequest').ScriptBlock
+$updateBotStatus          = (Get-Command -Name 'Update-BotStatus').ScriptBlock
+$writeResponse            = (Get-Command -Name 'Write-Response').ScriptBlock
 
-function Import-EnvironmentVariablesFile {
-    <#
-    .SYNOPSIS
-        Imports environment variables from an environment file and additional parameters into the current session.
+# Build an InitialSessionState and import modules into it
+$iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
 
-    .DESCRIPTION
-        This function reads an environment file (each line formatted as KEY=value) and splits each line on the first "=".
-        In addition, it accepts an array of additional environment variable strings (AdditionalEnvironmentVariables) in key=value format.
-        Both sets of key-value pairs are imported into the current session's environment.
-        Any keys specified in SkipNames are skipped.
+# Create & open the runspace with that ISS
+$runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
+$runspace.Open()
 
-    .PARAMETER EnvironmentFilePath
-        The full path to the environment file. Defaults to ".env" in the script's directory.
+# Create a new in-process runspace for monitoring and registration logic
+$powerShell = [PowerShell]::Create()
+$powerShell.Runspace = $runspace
 
-    .PARAMETER SkipNames
-        An array of environment variable names that should not be imported from the file or the additional parameters.
+# Create empty PSDataCollections for input/output (required by PS5 BeginInvoke signature)
+$inputBuffer  = [System.Management.Automation.PSDataCollection[PSObject]]::new()
+$outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
 
-    .PARAMETER AdditionalEnvironmentVariables
-        An array of additional environment variable strings in key=value format.
+# Relay warnings from the runspace
+$powerShell.Streams.Warning.add_DataAdded({
+        param($s, $e)
         
-    .EXAMPLE
-        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME" `
-            -AdditionalEnvironmentVariables @("MY_VAR=Value1", "OTHER_VAR=Value2")
-    #>
-    [CmdletBinding()]
+        $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+        [Console]::ForegroundColor = [ConsoleColor]::Yellow
+        [Console]::WriteLine("$($timestamp) - WRN: (Start-HttpStaticListenerBot) $($s[$e.Index].Message)")
+        [Console]::ResetColor()
+    })
+
+# Only wire up informational relaying if the session is configured to show Information streams
+if ($InformationPreference -eq 'Continue') {
+        # Relay informational messages from the runspace
+        $powerShell.Streams.Information.add_DataAdded({
+            param($s, $e)
+
+            $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+            [Console]::WriteLine("$($timestamp) - INF: (Start-HttpStaticListenerBot) $($s[$e.Index].MessageData)")
+        })
+    }
+
+# Add the script to the runspace, passing in all helper scriptblocks and parameters
+$powerShell.AddScript({
     param(
-        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
-        [string[]]$SkipNames                      = @(),
-        [string[]]$AdditionalEnvironmentVariables = @()
-    )
-
-    Write-Verbose "Check if the environment file exists; if not, display a message and exit"
-    if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Warning "The environment file was not found at path: $($EnvironmentFilePath)"
-        return
-    }
-
-    Write-Verbose "Read the environment file line by line"
-    $parametersCollection = (Get-Content $EnvironmentFilePath -Force -Encoding UTF8) + $AdditionalEnvironmentVariables
-    $parametersCollection | ForEach-Object {
-        Write-Verbose "Skip lines that are comments (starting with '#') or empty after trimming whitespace"
-        if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
-            return
-        }
-
-        Write-Verbose "Split the line into two parts at the first '=' occurrence"
-        $parts = $_.Split('=', 2)
-        
-        Write-Verbose "If the line does not contain exactly two parts, skip it"
-        if ($parts.Length -ne 2) {
-            return
-        }
-        
-        Write-Verbose "Trim any leading or trailing whitespace from the key and value"
-        $key   = $parts[0].Trim()
-        $value = $parts[1].Trim()
-
-        # Skip this key if it is in the skip list.
-        if ($SkipNames -contains $key) {
-            Write-Verbose "Skipping environment variable '$($key)' as it is in the skip list"
-            return
-        }
-        
-        Set-Item -Path "Env:$($key)" -Value $value
-        Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
-    }
-}
-
-function Invoke-G4Bot {
-    <#
-    .SYNOPSIS
-        Updates the automation configuration and initiates the G4Bot process via a remote endpoint.
-
-    .DESCRIPTION
-        This function performs the following steps to trigger the G4Bot automation process:
-          1. Generates a unique session identifier based on the current date and time.
-          2. Constructs file paths for output, bot configuration, and error logs.
-          3. Reads and parses the existing "automation.json" configuration file.
-          4. Updates the configuration with new driver binaries and an authentication token.
-          5. Serializes the updated configuration into JSON, encodes it in Base64, and sends it via an HTTP POST request 
-             to the remote hub endpoint.
-          6. Logs the response or any errors to designated output and error log files.
-    
-    .PARAMETER BotVolume
-        The base directory where the bot's folders (e.g., output, errors) are located.
-
-    .PARAMETER BotName
-        The name of the bot; used to construct file paths and log filenames.
-
-    .PARAMETER DriverBinaries
-        The driver binaries configuration to update in the automation file.
-
-    .PARAMETER HubUri
-        The base URI of the hub to which the updated automation configuration is sent.
-
-    .PARAMETER JsonData
-        The JSON data content to be injected into the automation configuration.
-
-    .PARAMETER Token
-        The authentication token required to update the configuration at the remote endpoint.
-
-    .OUTPUTS
-        Returns the response received from the remote endpoint after sending the updated configuration.
-    #>
-    param(
-        $BotVolume,
-        $BotName,
-        $DriverBinaries,
-        $HubUri,
-        $JsonData,
-        $Token
-    )
-
-    Write-Verbose "Generating a unique session identifier using the current date and time"
-    $session = (Get-Date).ToString("yyyyMMddHHmmssfff")
-
-    Write-Verbose "Constructing file paths for archive, input, output, and bot directories."
-    $archiveDirectory       = [System.IO.Path]::Combine($BotVolume, $BotName, "archive")
-    $outputDirectory        = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
-    $botDirectory           = Join-Path $BotVolume $BotName
-    $botAutomationDirectory = Join-Path $botDirectory "bot"
-    $botFilePath            = Join-Path $botAutomationDirectory "automation.json"
-    
-    Write-Verbose "Constructing output and error log file paths"
-    $outputFilePath = [System.IO.Path]::Combine($outputDirectory, "$($BotName)-$($session).json")
-    $errorsPath     = [System.IO.Path]::Combine($BotVolume, $BotName, "errors", "$($BotName)-$($session).json")
-    
-    Write-Verbose "Reading and parsing the 'automation.json' configuration file"
-    $botFileContent = [System.IO.File]::ReadAllText($botFilePath, [System.Text.Encoding]::UTF8)
-    $botFileJson    = ConvertFrom-Json $botFileContent
-
-    Write-Verbose "Updating the 'dataSource' property in the configuration with the provided JSON data."
-    $dataSourceValue = @{
-        type   = "JSON"
-        source = $JsonData
-    }
-    if (-not $botFileJson.PSObject.Properties['dataSource']) {
-        Add-Member -InputObject $botFileJson -MemberType NoteProperty -Name "dataSource" -Value $dataSourceValue
-    }
-    else {
-        $botFileJson.dataSource = $dataSourceValue
-    }
-
-    Write-Verbose "Archiving the data source JSON to the archive directory with a timestamped filename."
-    [System.IO.File]::WriteAllText([System.IO.Path]::Combine($archiveDirectory, "data-$($session).json"), $JsonData, [System.Text.Encoding]::UTF8)
-    
-    Write-Verbose "Updating driver binaries and authentication token in the configuration"
-    $botFileJson.driverParameters.driverBinaries = $DriverBinaries
-    $botFileJson.authentication.token            = $Token
-    
-    Write-Verbose "Serializing the updated configuration to JSON and encoding it in Base64"
-    $botFileContent = ConvertTo-Json $botFileJson -Depth 50 -Compress
-    $botBytes       = [System.Text.Encoding]::UTF8.GetBytes($botFileContent)
-    $botContent     = [System.Convert]::ToBase64String($botBytes)
-
-    Write-Verbose "Constructing the request URI by appending the API endpoint to the Hub URI"
-    $requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
-    
-    try {
-        Write-Host "Sending the Base64-encoded configuration to the remote endpoint at: $($requestUri)"
-        $response = Invoke-WebRequest -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
-    }
-    catch {
-        $baseException = $_.Exception.GetBaseException()
-        $errorResponse = @{
-            error      = "Internal Server Error"
-            message    = $baseException.Message
-            stackTrace = $baseException.StackTrace
-        }
-        $errorResponseJson = ($errorResponse | ConvertTo-Json -Depth 30 -Compress)
-        $response = @{
-            Content       = $errorResponseJson
-            Base64Content = ([System.Convert]::ToBase64String(([System.Text.Encoding]::UTF8.GetBytes($errorResponseJson))))
-            ContentType   = "application/json; charset=utf-8"
-            StatusCode    = 500
-        }
-
-        $response.Content | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
-        Write-Error "An error occurred '$($baseException.Message)'.$([System.Environment]::NewLine)Check $($errorsPath) for details"
-    }
-    try {
-        Write-Verbose "Saving the response from the remote endpoint to the output file: $($outputFilePath)"
-        if ($null -ne $outputFilePath -and $response.StatusCode -lt 204) {
-            $response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
-        }
-    }
-    catch {
-        Write-Error "Failed to save response to: $outputFilePath. Error details: $($_.Exception.GetBaseException().Message)"
-    }
-
-    Write-Verbose "Invoke-G4Bot execution completed"
-    return $response
-}
-
-function Write-Response {
-    <#
-    .SYNOPSIS
-        Writes an HTTP response to the output stream.
-
-    .DESCRIPTION
-        This function encodes a given response string into a UTF-8 byte array, sets the HTTP response's
-        content type, length, and status code, writes the encoded content to the response's output stream,
-        and then closes the stream.
-
-    .PARAMETER ContentType
-        Specifies the MIME type for the response (e.g., "text/html").
-
-    .PARAMETER Response
-        An HttpListenerResponse object to which the response will be written.
-
-    .PARAMETER ResponseContent
-        The text content that will be sent as the HTTP response body.
-
-    .PARAMETER StatusCode
-        (Optional) The HTTP status code to be set on the response. Defaults to 200.
-
-    .OUTPUTS
-        None. The function writes directly to the provided HTTP response output stream.
-    #>
-    param(
-        $ContentType,
-        $Response,
         $Base64ResponseContent,
-        $StatusCode = 200
+        $BotBase64Content,
+        $BotEntryPoint,
+        $BotId,
+        $BotName,
+        $ContentType,
+        $ErrorsDirectory,
+        $FormatParameters,
+        $HubUri,
+        $NewGenericError,
+        $OutputDirectory,
+        $SaveErrors,
+        $SaveResponse,
+        $SendBotAutomationRequest,
+        $UpdateBotStatus,
+        $WriteResponse,
+        $Listener
     )
 
     try {
-        Write-Verbose "Encoding the response string to a UTF8 byte array"
-        $decodedContent           = ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Base64ResponseContent)))
-        $buffer                   = [System.Text.Encoding]::UTF8.GetBytes($decodedContent)
-        $Response.ContentLength64 = $buffer.Length
-        $Response.ContentType     = $ContentType
-        $Response.StatusCode      = $StatusCode
+        # Enable debug, information, and verbose output for troubleshooting
+        $DebugPreference       = 'Continue'
+        $InformationPreference = 'Continue'
+        $VerbosePreference     = 'Continue'
 
-        Write-Verbose "Writing the encoded response to the output stream and closing it"
-        $output = $Response.OutputStream
-        $output.Write($buffer, 0, $buffer.Length)
+        # Add the main ingress URL and the /ping endpoint to listen on
+        $Listener.Prefixes.Add("$($BotEntryPoint.TrimEnd('/'))/")
+        $Listener.Prefixes.Add("$($BotEntryPoint.TrimEnd('/'))/ping/")
+    
+        # Begin listening for HTTP requests
+        $Listener.Start()
+
+        # Continue looping until the parent task completes
+        while ($true) {
+            # Wait for the next incoming HTTP context
+            $context  = $Listener.GetContext()
+            $request  = $context.Request    # The incoming HTTP request
+            $response = $context.Response   # The HTTP response to send back
+
+            # Generate a unique session ID based on current timestamp
+            $session = (Get-Date).ToString("yyyyMMddHHmmssfff")
+
+            # Build file paths for saving output and errors
+            $outputFilePath = [IO.Path]::Combine($OutputDirectory, "$($BotName)-$($session).json")
+            $errorFilePath  = [IO.Path]::Combine($ErrorsDirectory, "$($BotName)-$($session).json")
+
+            # Handle CORS preflight (OPTIONS) requests
+            if ($request.HttpMethod.ToUpper() -eq "OPTIONS") {
+                $response.StatusCode = 200
+                $response.Headers.Add("Access-Control-Allow-Origin", "*")
+                $response.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS")
+                $response.Headers.Add("Access-Control-Allow-Headers", "Content-Type")
+                $response.Close()
+            
+                # Skip further processing for OPTIONS
+                continue
+            }
+
+            # Reject any method other than GET
+            if ($request.HttpMethod.ToUpper() -ne "GET") {
+                # Create an HTTP request exception indicating the method is not allowed
+                $error405 = & $NewGenericError `
+                    -Exception  (New-Object System.Exception "Only GET requests are accepted") `
+                    -StatusCode 405 `
+                    -Title      'Method Not Allowed' `
+                    -Controller $BotName `
+                    -Action     'Invoke' `
+                    -TraceId    "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+                    
+                # Send the serialized error response with status code 405
+                & $WriteResponse `
+                    -Response               $response `
+                    -Base64ResponseContent  $error405.Base64Value `
+                    -StatusCode             405
+
+                # Skip further processing for this request since it used an invalid method
+                continue
+            }
+
+            # Handle health-check /ping endpoint
+            if ($request.RawUrl -match '(?i)/ping(?:/)?(?:\?.*)?$') {
+                & $WriteResponse `
+                    -Response              $response `
+                    -Base64ResponseContent "eyJtZXNzYWdlIjoicG9uZyJ9"
+            
+                # Skip bot processing for ping
+                continue  
+            }
+
+            # If no query string parameters are provided, return an error JSON.
+            if($request.QueryString.Count -eq 0) {
+                # Create an HTTP request exception indicating bad request
+                $error400 = & $NewGenericError `
+                    -Exception  (New-Object System.Exception "Missing query parameters") `
+                    -StatusCode 400 `
+                    -Title      'Bad Request' `
+                    -Controller $BotName `
+                    -Action     'Invoke' `
+                    -TraceId    "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+
+                # Send the serialized error response with status code 405
+                & $WriteResponse `
+                    -Response              $response `
+                    -Base64ResponseContent $error400.Base64Value `
+                    -StatusCode            400
+                
+                # Skip further processing for this request since it used an invalid method
+                continue
+            }
+            
+            # Notify the hub that the bot is working on a new request
+            & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Working" | Out-Null
+
+            # Send the automation request to the bot and capture its response
+            $botResponse = & $SendBotAutomationRequest `
+                -HubUri         $HubUri `
+                -Base64Request  $BotBase64Content
+
+            # Normalize status code to a string array, even if it's just one item
+            $statusCodes = @(@($botResponse.StatusCode) | Where-Object { -not [string]::IsNullOrWhiteSpace("$($_)") })
+
+            # Safely pick last valid status code
+            if ($statusCodes.Length -gt 0) {
+                $botStatusCodeValue = "$($statusCodes[-1])"
+            } else {
+                Write-Warning "Status code array contains only empty/null values. Falling back to status code 500."
+                $botStatusCodeValue = "500"
+            }
+
+            # Try parsing explicitly
+            $botStatusCode = 0
+            if (-not [int]::TryParse($botStatusCodeValue, [ref]$botStatusCode)) {
+                Write-Warning "Failed parsing status code from: $($botStatusCodeValue). Falling back to status code 500."
+            }
+
+            # Normalize status code to if failed to parse
+            $botStatusCode = if($botStatusCode -eq 0) { 500 } else { $botStatusCode }
+
+            # If the bot returned an error and we should save errors, write to error file
+            if ($botStatusCode -ge 400 -and $SaveErrors) {
+                Set-Content -Value $botResponse.JsonValue -Path $errorFilePath
+                $bytes                 = [System.Text.Encoding]::UTF8.GetBytes($botResponse.JsonValue)
+                $Base64ResponseContent = [System.Convert]::ToBase64String($bytes)
+            }
+
+            # If the bot succeeded and we should save responses, write to output file
+            if ($botStatusCode -eq 200 -and $SaveResponse) {
+                Set-Content -Value $botResponse.JsonValue -Path $outputFilePath
+            }
+       
+            # Choose response Content-Type: use bot’s type for error bodies, default otherwise
+            $responseContentType = if ($botStatusCode -gt 204) {
+                $botResponse.ContentType
+            } else {
+                $ContentType
+            }
+
+            # Write the final HTTP response back to the caller
+            & $WriteResponse `
+                -Response              $response `
+                -Base64ResponseContent $Base64ResponseContent `
+                -ContentType           $responseContentType `
+                -StatusCode            $botStatusCode
+
+            # Notify the hub that the bot is now ready for a new request
+            & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Ready" | Out-Null
+        }
+
+        # After loop exits, stop and close the listener
+        $Listener.Stop()
+        $Listener.Close()
     }
     catch {
-        Write-Error "An error occurred while writing the response: $($_.Exception.GetBaseException().Message)"
+        # Log the exception message as a warning
+        Write-Warning $Exception.Message
+    
+        # Notify the hub that the bot is now offline and cannot accept new requests
+        & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Offline" | Out-Null
+    
+        # Issue a specific warning indicating the I/O operation was aborted (common during thread exit or shutdown)
+        Write-Warning "The I/O operation has been aborted because of either a thread exit or an application request"
     }
-    finally {
-        Write-Verbose "Ensure that the output stream is closed regardless of any error"
-        if ($Response -and $Response.OutputStream) {
-            $Response.OutputStream.Close()
-        }
+}) | Out-Null
+
+# Initialize the bot HTTP listener
+$listener = New-Object System.Net.HttpListener
+
+# Add arguments matching the runspace script's param() order
+$powerShell.AddArgument($Base64ResponseContent)    | Out-Null
+$powerShell.AddArgument($botBase64Content)         | Out-Null
+$powerShell.AddArgument($botEntryPoint)            | Out-Null
+$powerShell.AddArgument($instance)                 | Out-Null
+$powerShell.AddArgument($botCalculatedName)        | Out-Null
+$powerShell.AddArgument($ContentType)              | Out-Null
+$powerShell.AddArgument($errorsDirectory)          | Out-Null
+$powerShell.AddArgument($formatParameters)         | Out-Null
+$powerShell.AddArgument($HubUri)                   | Out-Null
+$powerShell.AddArgument($newGenericError)          | Out-Null
+$powerShell.AddArgument($outputDirectory)          | Out-Null
+$powerShell.AddArgument($SaveErrors)               | Out-Null
+$powerShell.AddArgument($SaveResponse)             | Out-Null
+$powerShell.AddArgument($sendBotAutomationRequest) | Out-Null
+$powerShell.AddArgument($updateBotStatus)          | Out-Null
+$powerShell.AddArgument($writeResponse)            | Out-Null
+$powerShell.AddArgument($listener)                 | Out-Null
+
+# Start the runspace asynchronously, capturing the IAsyncResult
+$async = $powerShell.BeginInvoke($inputBuffer, $outputBuffer)
+
+# Allow a moment for the listener to spin up
+Write-Host "Bot HTTP listener initializing... please wait few seconds"
+Start-Sleep -Seconds 3
+
+Write-Host "`nListening for incoming http requests for bot '$($BotName)' on uri '$($botEntryPoint)'.`nPress [Ctrl] + [C] to stop the bot.`n"
+
+# Loop until the callback listener runspace completes
+while ((-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runner.InvocationStateInfo.State -eq 'Running') -and (-not $async.IsCompleted -and $powerShell.InvocationStateInfo.State -eq 'Running')) {
+    try {
+        Start-Sleep -Seconds 3
+    }
+    catch {
+        # Catch any unexpected errors, log a warning, and wait before retry
+        Write-Log -Level Error -Message "(Start-HttpStaticListenerBot) $($_)" -UseColor
+        Start-Sleep -Seconds 3
     }
 }
+
+# Teardown the HTTP listener to stop accepting requests and release resources
+try {
+    # Abort immediately cancels any in-flight requests and stops the listener
+    $listener.Abort()
+
+    # Dispose cleans up underlying network handles and frees memory
+    $listener.Dispose()
+}
+catch {
+    # Ignore any errors that occur during abort/dispose
+}
+finally {
+    # Exit the script with a success code to signal normal shutdown
+    exit 0
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<#
 
 Clear-Host
 Write-Verbose "Construct the base endpoint for the bot."
@@ -524,3 +677,4 @@ finally {
     $listener.Stop()
     $listener.Close()
 }
+#>

@@ -76,7 +76,10 @@ if ($Docker) {
         $cmdLines += " -p $($botConfiguration.Endpoints.EntryPointPort):$($botConfiguration.Endpoints.EntryPointPort)"
         
         # Publish port and assign unique container name
-        $cmdLines += " -p $($botConfiguration.Endpoints.CallbackPort):$($botConfiguration.Endpoints.CallbackPort) --name `"$($botConfiguration.Metadata.BotName)-$([guid]::NewGuid())`" g4-http-static-listener-bot:latest"
+        $cmdLines += " -p $($botConfiguration.Endpoints.CallbackPort):$($botConfiguration.Endpoints.CallbackPort)"
+
+        # Set container name and tag
+        $cmdLines += " --name `"$($botConfiguration.Metadata.BotName)-$([guid]::NewGuid())`" g4-http-static-listener-bot:latest"
 
         # Combine the array of arguments into one continuous string
         Write-Log -Level Verbose -UseColor -Message "Joining command parts into a single Docker command string."
@@ -109,6 +112,7 @@ $saveErrors        = $botConfiguration.Settings.SaveErrors
 $saveResponse      = $botConfiguration.Settings.SaveResponse
 
 # Definitions: grab the ScriptBlock for each function so they can be injected into a child runspace
+$newGenericError          = (Get-Command -Name 'New-GenericError').ScriptBlock
 $sendBotAutomationRequest = (Get-Command -Name 'Send-BotAutomationRequest').ScriptBlock
 $updateBotStatus          = (Get-Command -Name 'Update-BotStatus').ScriptBlock
 $writeResponse            = (Get-Command -Name 'Write-Response').ScriptBlock
@@ -160,6 +164,7 @@ $powerShell.AddScript({
         $ContentType,
         $ErrorsDirectory,
         $HubUri,
+        $NewGenericError,
         $OutputDirectory,
         $SaveErrors,
         $SaveResponse,
@@ -210,12 +215,22 @@ $powerShell.AddScript({
 
             # Reject any method other than GET
             if ($request.HttpMethod.ToUpper() -ne "GET") {
+                # Create an HTTP request exception indicating the method is not allowed
+                $error405 = & $NewGenericError `
+                    -Exception  (New-Object System.Exception "Only GET requests are accepted") `
+                    -StatusCode 405 `
+                    -Title      'Method Not Allowed' `
+                    -Controller $BotName `
+                    -Action     'Invoke' `
+                    -TraceId    "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+                    
+                # Send the serialized error response with status code 405
                 & $WriteResponse `
-                    -Response              $response `
-                    -Base64ResponseContent "eyJlcnJvciI6Ik1ldGhvZCBOb3QgQWxsb3dlZCIsIm1lc3NhZ2UiOiJPbmx5IEdFVCByZXF1ZXN0cyBhcmUgYWNjZXB0ZWQifQ==" `
-                    -StatusCode            405
+                    -Response               $response `
+                    -Base64ResponseContent  $error405.Base64Value `
+                    -StatusCode             405
 
-                # Skip further processing for invalid method
+                # Skip further processing for this request since it used an invalid method
                 continue
             }
 
@@ -320,6 +335,7 @@ $powerShell.AddArgument($botCalculatedName)        | Out-Null
 $powerShell.AddArgument($ContentType)              | Out-Null
 $powerShell.AddArgument($errorsDirectory)          | Out-Null
 $powerShell.AddArgument($HubUri)                   | Out-Null
+$powerShell.AddArgument($newGenericError)          | Out-Null
 $powerShell.AddArgument($outputDirectory)          | Out-Null
 $powerShell.AddArgument($SaveErrors)               | Out-Null
 $powerShell.AddArgument($SaveResponse)             | Out-Null
