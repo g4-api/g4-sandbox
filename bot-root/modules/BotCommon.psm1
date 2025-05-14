@@ -156,6 +156,7 @@ $newGenericError = {
     return @{
         Base64Value = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($jsonValue))
         JsonValue   = $jsonValue
+        StatusCode  = $StatusCode
         Value       = $errorObject
     }
 }
@@ -882,6 +883,68 @@ function Send-BotAutomationRequest {
 
 <#
 .SYNOPSIS
+    Decodes a base64-encoded automation request, injects structured JSON data into it, and returns the modified request as a JSON string.
+
+.DESCRIPTION
+    This function decodes a base64-encoded JSON automation request, ensures the supplied JSON data is treated as an array (even if a single object is passed),
+    sets the `dataSource` property on the automation request, and outputs the updated object as a compressed JSON string.
+
+.PARAMETER Base64AutomationRequest
+    A Base64-encoded string representing the original automation request JSON.
+
+.PARAMETER JsonData
+    A raw JSON string to inject as the data source into the automation request. If not an array, it will be wrapped in one.
+
+.OUTPUTS
+    [string] - A JSON-formatted string representing the updated automation request.
+
+.EXAMPLE
+    Set-JsonData -Base64AutomationRequest $request -JsonData '{ "id": 1, "name": "Test" }'
+#>
+function Set-JsonData {
+    param(
+        [string]$Base64AutomationRequest,  # The original automation request, base64-encoded
+        [string]$JsonData                  # Raw JSON string (either a single object or an array)
+    )
+
+    # Decode the base64 input string into a byte array
+    $bytes = [System.Convert]::FromBase64String($Base64AutomationRequest)
+
+    # Convert the byte array to a UTF-8 string (the original JSON)
+    $automationRequest = [System.Text.Encoding]::UTF8.GetString($bytes)
+
+    # Parse the JSON string into a PowerShell object
+    $automationObject = $automationRequest | ConvertFrom-Json
+
+    # Determine if the input JSON data is already a JSON array
+    $isArray = $JsonData.StartsWith('[') -and $JsonData.EndsWith(']')
+
+    # Wrap the JSON data in array brackets if it's not already an array
+    $JsonData = if ($isArray) { $JsonData } else { "[$($JsonData)]" }
+
+    # Add the 'dataSource' property if it doesn't exist (by exact name match)
+    if (-not $automationObject.PSObject.Properties['dataSource']) {
+        $null = $automationObject | Add-Member -NotePropertyName 'dataSource' -NotePropertyValue $null -PassThru
+    }
+
+    # Inject the JSON data into the 'dataSource' field of the automation object
+    $automationObject.dataSource = @{
+        source = $JsonData  # The JSON payload to attach
+        type   = "JSON"     # Specify the data source type
+    }
+
+    # Convert the updated automation object back to a compact JSON string
+    $jsonRequest = $automationObject | ConvertTo-Json -Depth 100 -Compress
+
+    # Encode the updated JSON string as UTF-8 bytes
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonRequest)
+
+    # Convert the byte array back to a Base64-encoded string and return it
+    return [System.Convert]::ToBase64String($bytes)
+}
+
+<#
+.SYNOPSIS
     Checks whether a specified bot file exists.
 
 .DESCRIPTION
@@ -912,6 +975,100 @@ function Test-BotFile {
     
     # Indicate failure
     return $false
+}
+
+<#
+.SYNOPSIS
+    Determines if a JSON string is valid and not empty.
+
+.DESCRIPTION
+    This function takes a JSON string as input and attempts to convert it using ConvertFrom-Json.
+    It then evaluates "emptiness" as follows:
+      - For a JSON object, it is considered empty if it has no properties.
+      - For a JSON array, it is considered empty if the array has no elements or if every element in the array 
+        is an empty object (i.e. an object with no properties).
+    Note: Due to PowerShell 5 behavior, a JSON array containing a single element may be converted as a PSCustomObject 
+    instead of an array. This function detects if the original JSON string was wrapped in array brackets and, if so, 
+    forces the conversion result into an array.
+
+    The function returns **$true** if the JSON is valid and contains data; it returns **$false** if the JSON is empty 
+    or invalid.
+
+.PARAMETER JsonString
+    The JSON string to test.
+
+.OUTPUTS
+    A boolean value:
+      - **$true** if the JSON is valid and not empty.
+      - **$false** if the JSON is empty or invalid.
+#>
+function Test-Json {
+    param(
+        [string]$JsonString
+    )
+
+    # Return false if the input string is null
+    if ($null -eq $JsonString) {
+        return $false
+    }
+
+    # Trim the input and detect if it is meant to be an array.
+    $trimmedJson     = $JsonString.Trim()
+    $originalIsArray = $trimmedJson.StartsWith("[") -and $trimmedJson.EndsWith("]")
+
+    # Return false if the input string is null or empty (nothing to validate)
+    if ([string]::IsNullOrEmpty($trimmedJson)) {
+        return $false
+    }
+
+    try {
+        # Attempt to parse the JSON string into a PowerShell object
+        $parsed = $JsonString | ConvertFrom-Json
+    }
+    catch {
+        # If parsing fails (invalid JSON), return false
+        return $false
+    }
+
+    # Workaround for PS 5 behavior: if the original JSON was an array but conversion returns a PSCustomObject,
+    # force it into an array.
+    if ($originalIsArray -and ($parsed -isnot [array])) {
+        $parsed = ,$parsed
+    }
+
+    # If the parsed JSON is an array, evaluate its elements.
+    if ($parsed -is [array]) {
+        if (($null -eq $parsed.Count) -or ($parsed.Count -eq 0)) {
+            return $false
+        }
+        # Check if at least one element is non-empty.
+        foreach ($item in $parsed) {
+            if ($item -is [PSCustomObject]) {
+                if (($null -eq $item.PSObject.Properties.Count) -or ($item.PSObject.Properties.Count -eq 0)) {
+                    return $false
+                }
+            }
+            else {
+                # Non-object elements (e.g. primitives) are not considered as data.
+                return $false
+            }
+        }
+        # If we looped through all elements and found no non-empty ones, return true.
+        return $true
+    }
+    # If the parsed JSON is an object, check its properties.
+    elseif ($parsed -is [PSCustomObject]) {
+        if (($null -eq $parsed.PSObject.Properties.Count) -or ($parsed.PSObject.Properties.Count -eq 0)) {
+            return $false
+        }
+        else {
+            return $true
+        }
+    }
+    else {
+        # For primitives and other types, consider them as valid data.
+        return $true
+    }
 }
 
 <#
@@ -1108,7 +1265,9 @@ Export-ModuleMember -Function Join-Uri
 Export-ModuleMember -Function New-BotConfiguration
 Export-ModuleMember -Function New-GenericError
 Export-ModuleMember -Function Send-BotAutomationRequest
+Export-ModuleMember -Function Set-JsonData
 Export-ModuleMember -Function Test-BotFile
+Export-ModuleMember -Function Test-Json
 Export-ModuleMember -Function Test-Port
 Export-ModuleMember -Function Wait-Interval
 Export-ModuleMember -Function Write-Response

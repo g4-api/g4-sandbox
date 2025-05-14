@@ -33,7 +33,7 @@ $ContentType           = if([string]::IsNullOrEmpty($ContentType))           { "
 $botConfiguration = New-BotConfiguration `
     -BotId               $BotId `
     -BotName             $BotName `
-    -BotType             'static-http-bot' `
+    -BotType             'qs-http-bot' `
     -BotVolume           $BotVolume `
     -CallbackIngress     $CallbackIngress `
     -CallbackUri         $CallbackUri `
@@ -124,10 +124,14 @@ $formatParameters = {
     }
 
     # Successfully formatted query string parameters into a PSObject.
-    return $dataObject
+    return @{
+        StatusCode = 200
+        Value = $dataObject | ConvertTo-Json -Depth 5 -Compress
+    }
 }
 $newGenericError          = (Get-Command -Name 'New-GenericError').ScriptBlock
 $sendBotAutomationRequest = (Get-Command -Name 'Send-BotAutomationRequest').ScriptBlock
+$setJsonData              = (Get-Command -Name 'Set-JsonData').ScriptBlock
 $updateBotStatus          = (Get-Command -Name 'Update-BotStatus').ScriptBlock
 $writeResponse            = (Get-Command -Name 'Write-Response').ScriptBlock
 
@@ -184,6 +188,7 @@ $powerShell.AddScript({
         $SaveErrors,
         $SaveResponse,
         $SendBotAutomationRequest,
+        $SetJsonData,
         $UpdateBotStatus,
         $WriteResponse,
         $Listener
@@ -228,6 +233,16 @@ $powerShell.AddScript({
                 continue
             }
 
+            # Handle health-check /ping endpoint
+            if ($request.RawUrl -match '(?i)/ping(?:/)?(?:\?.*)?$') {
+                & $WriteResponse `
+                    -Response              $response `
+                    -Base64ResponseContent "eyJtZXNzYWdlIjoicG9uZyJ9"
+            
+                # Skip bot processing for ping
+                continue  
+            }
+
             # Reject any method other than GET
             if ($request.HttpMethod.ToUpper() -ne "GET") {
                 # Create an HTTP request exception indicating the method is not allowed
@@ -247,16 +262,6 @@ $powerShell.AddScript({
 
                 # Skip further processing for this request since it used an invalid method
                 continue
-            }
-
-            # Handle health-check /ping endpoint
-            if ($request.RawUrl -match '(?i)/ping(?:/)?(?:\?.*)?$') {
-                & $WriteResponse `
-                    -Response              $response `
-                    -Base64ResponseContent "eyJtZXNzYWdlIjoicG9uZyJ9"
-            
-                # Skip bot processing for ping
-                continue  
             }
 
             # If no query string parameters are provided, return an error JSON.
@@ -282,6 +287,14 @@ $powerShell.AddScript({
             
             # Notify the hub that the bot is working on a new request
             & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Working" | Out-Null
+
+            # Format query string parameters into a JSON-compatible structure
+            # This typically turns the query string into a JSON object or array for injection
+            $jsonData = (& $formatParameters -QueryString $request.QueryString).Value
+
+            # Inject the formatted JSON data into the base64-encoded automation request
+            # This returns a new Base64-encoded automation request with updated .dataSource field
+            $BotBase64Content = & $SetJsonData -Base64AutomationRequest $BotBase64Content -JsonData $jsonData
 
             # Send the automation request to the bot and capture its response
             $botResponse = & $SendBotAutomationRequest `
@@ -344,7 +357,9 @@ $powerShell.AddScript({
     }
     catch {
         # Log the exception message as a warning
-        Write-Warning $Exception.Message
+        if(-not $_.Exception.Message.Contains('The I/O operation has been aborted because of either a thread exit or an application request')) {
+            Write-Warning $_.Exception.Message
+        }
     
         # Notify the hub that the bot is now offline and cannot accept new requests
         & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Offline" | Out-Null
@@ -372,6 +387,7 @@ $powerShell.AddArgument($outputDirectory)          | Out-Null
 $powerShell.AddArgument($SaveErrors)               | Out-Null
 $powerShell.AddArgument($SaveResponse)             | Out-Null
 $powerShell.AddArgument($sendBotAutomationRequest) | Out-Null
+$powerShell.AddArgument($setJsonData)              | Out-Null
 $powerShell.AddArgument($updateBotStatus)          | Out-Null
 $powerShell.AddArgument($writeResponse)            | Out-Null
 $powerShell.AddArgument($listener)                 | Out-Null

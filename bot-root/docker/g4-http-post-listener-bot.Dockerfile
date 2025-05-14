@@ -2,7 +2,8 @@
 FROM ubuntu:24.04
 
 # Expose the internal port which will be used by the listener
-EXPOSE 8080
+EXPOSE 9213
+EXPOSE 9123
 
 # Prevent interactive dialogs during package install
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,7 +13,7 @@ ENV TERM=xterm
 
 # Install prerequisites
 RUN apt-get update && \
-    apt-get install -y wget apt-transport-https software-properties-common gnupg && \
+    apt-get install -y wget apt-transport-https software-properties-common gnupg curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and install Microsoft repository GPG keys
@@ -26,12 +27,18 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Echo the variables in the desired format during build
-RUN echo "BOT_NAME: ${BOT_NAME}" && \
-    echo "BOT_URI: ${BOT_URI}" && \
-    echo "CONTENT_TYPE: ${CONTENT_TYPE}" && \
+RUN echo "BASE64_RESPONSE_CONTENT: ${BASE64_RESPONSE_CONTENT}" && \
+    echo "BOT_ID: ${BOT_ID}" && \
+    echo "BOT_NAME: ${BOT_NAME}" && \
+    echo "CALLBACK_INGRESS: ${CALLBACK_INGRESS}" && \
+    echo "CALLBACK_URI: ${CALLBACK_URI}" && \
+    echo "CONTENT_TYPE: ${CONTENT_TYPE}" && \    
     echo "DRIVER_BINARIES: ${DRIVER_BINARIES}" && \
+    echo "ENTRY_POINT_INGRESS: ${ENTRY_POINT_INGRESS}" && \
+    echo "ENTRY_POINT_URI: ${ENTRY_POINT_URI}" && \
     echo "HUB_URI: ${HUB_URI}" && \
-    echo "RESPONSE_CONTENT: ${RESPONSE_CONTENT}" && \
+    echo "SAVE_ERRORS: ${SAVE_ERRORS}" && \
+    echo "SAVE_RESPONSE: ${SAVE_RESPONSE}" && \
     echo "TOKEN: ${TOKEN}"
 
 # Create the /bots directory and ensure it has read/write permissions
@@ -43,13 +50,22 @@ WORKDIR /app
 # Copy the PowerShell script and .env file into the container
 COPY .env /app/.env
 COPY Start-HttpPostListenerBot.ps1 /app/Start-HttpPostListenerBot.ps1
+COPY modules /app/modules/
 
 # Make script executable (optional good practice)
 RUN chmod +x /app/Start-HttpPostListenerBot.ps1
 
-# Pass four parameters to the script:
-#   1) The bot volume location (/bot)
-#   2) BotName from environment variable
-#   3) HubUri from environment variable
-#   4) IntervalTime from environment variable
-CMD ["pwsh", "-Command", "./Start-HttpPostListenerBot.ps1 /bots $env:BOT_NAME $env:BOT_PORT $env:CONTENT_TYPE $env:DRIVER_BINARIES $env:HUB_URI $env:RESPONSE_CONTENT $env:TOKEN"]
+SHELL ["/bin/sh", "-c"]
+ENTRYPOINT pwsh -NoLogo -File ./Start-HttpPostListenerBot.ps1 \
+  -Base64ResponseContent "$BASE64_RESPONSE_CONTENT" \
+  -BotId                 "$BOT_ID" \  
+  -BotName               "$BOT_NAME" \
+  -BotVolume             "/bots" \
+  -CallbackIngress       "$CALLBACK_INGRESS" \
+  -CallbackUri           "$CALLBACK_URI" \
+  -ContentType           "$CONTENT_TYPE" \
+  -DriverBinaries        "$DRIVER_BINARIES" \
+  -EntryPointIngress     "$ENTRY_POINT_INGRESS" \
+  -EntryPointUri         "$ENTRY_POINT_URI" \
+  -HubUri                "$HUB_URI" \
+  -Token                 "$TOKEN"
