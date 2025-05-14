@@ -337,8 +337,8 @@ $powerShell.AddArgument($errorsDirectory)          | Out-Null
 $powerShell.AddArgument($HubUri)                   | Out-Null
 $powerShell.AddArgument($newGenericError)          | Out-Null
 $powerShell.AddArgument($outputDirectory)          | Out-Null
-$powerShell.AddArgument($SaveErrors)               | Out-Null
-$powerShell.AddArgument($SaveResponse)             | Out-Null
+$powerShell.AddArgument($saveErrors)               | Out-Null
+$powerShell.AddArgument($saveResponse)             | Out-Null
 $powerShell.AddArgument($sendBotAutomationRequest) | Out-Null
 $powerShell.AddArgument($updateBotStatus)          | Out-Null
 $powerShell.AddArgument($writeResponse)            | Out-Null
