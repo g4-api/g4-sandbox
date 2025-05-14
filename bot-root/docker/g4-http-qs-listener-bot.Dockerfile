@@ -3,6 +3,7 @@ FROM ubuntu:24.04
 
 # Expose the internal port which will be used by the listener
 EXPOSE 9213
+EXPOSE 9123
 
 # Prevent interactive dialogs during package install
 ENV DEBIAN_FRONTEND=noninteractive
