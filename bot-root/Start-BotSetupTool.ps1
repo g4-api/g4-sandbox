@@ -1204,25 +1204,10 @@ function Start-CronBotWizard {
         $Script
     )
 
-    # Define the wizard parameters as an array of ordered hashtables.
-    # Each parameter is configured with a default value, description, whether it's mandatory, and its name.
+    # Define wizard parameters as an array of ordered hashtables.
+    # Each ordered hashtable ensures that the keys appear in the specified order:
+    # Default, Description, Mandatory, and Name.
     $wizardParameters = @(
-        [ordered]@{
-            Default          = ""
-            Description      = "The root directory where the bot operates."
-            EnvironmentValue = $env:BOT_VOLUME
-            Mandatory        = $true
-            Name             = "BotVolume"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "g4-cron-bot"
-            Description      = "The name of the bot, used for identification and folder naming."
-            EnvironmentValue = $env:CRON_BOT_NAME
-            Mandatory        = $true
-            Name             = "BotName"
-            Type             = "String"
-        },
         [ordered]@{
             Default          = "* * * * *"
             Description      = "A comma-separated list of cron expressions (e.g., '0 0 * * *') used to schedule tasks."
@@ -1230,48 +1215,8 @@ function Start-CronBotWizard {
             Mandatory        = $true
             Name             = "CronSchedules"
             Type             = "String"
-        },
-        [ordered]@{
-            Default          = "http://localhost:4444/wd/hub"
-            Description      = "The directory containing the driver binaries or the grid endpoint for drivers."
-            EnvironmentValue = $env:DRIVER_BINARIES
-            Mandatory        = $true
-            Name             = "DriverBinaries"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = "http://localhost:9944"
-            Description      = "The base URI of the G4 Hub endpoint to which automation configurations are sent."
-            EnvironmentValue = $env:G4_HUB_URI
-            Mandatory        = $true
-            Name             = "HubUri"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = ""
-            Description      = "The authentication token (G4 license token) required for accessing the G4 Hub."
-            EnvironmentValue = $env:G4_LICENSE_TOKEN
-            Mandatory        = $true
-            Name             = "Token"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = $false
-            Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
-            EnvironmentValue = ""
-            Mandatory        = $false
-            Name             = "Docker"
-            Type             = "Switch"
-        },
-        [ordered]@{
-            Default          = "Normal"
-            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
-            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
-            Mandatory        = $false
-            Name             = "WindowStyle"
-            Type             = "String"
         }
-    )
+    ) + $commonParameters
 
     # Call the Show-Wizard function with the defined parameters.
     Show-Wizard `

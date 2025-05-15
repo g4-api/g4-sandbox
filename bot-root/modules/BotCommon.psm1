@@ -609,13 +609,35 @@ function Get-NextFile {
                 $archiveFileName = "$($baseName)-$($Session)$($extension)"
                 $archiveFilePath = Join-Path $ArchiveDirectory $archiveFileName
 
-                # Move the file into the archive directory
-                Move-Item -Path $latestFile.FullName -Destination $archiveFilePath -Force
+                # Ensure the archive directory exists
+                if (-not (Test-Path $ArchiveDirectory)) {
+                    New-Item -ItemType Directory -Path $ArchiveDirectory -Force | Out-Null
+                }
+
+                # Attempt to move the file with a timeout window of 15 seconds
+                $timeout = [DateTime]::UtcNow.AddSeconds(15)
+                $moved   = $false
+
+                while ([DateTime]::UtcNow -lt $timeout) {
+                    try {
+                        [System.IO.File]::Move($latestFile.FullName, $archiveFilePath)
+                        $moved = $true
+                        break
+                    }
+                    catch {
+                        Start-Sleep -Milliseconds 250
+                    }
+                }
+
+                # If the move failed even after the timeout window
+                if (-not $moved) {
+                    throw "Move operation timed out after 15 seconds for file: $($latestFile.FullName)"
+                }
             }
             catch {
                 # If archiving fails, append the error to the result's Reason
                 $archiveError = "Failed to archive file: $($_.Exception.GetBaseException().Message)"
-                $resultObject.Reason += " | $archiveError"
+                $resultObject.Reason += " | $($archiveError)"
             }
         }
     }

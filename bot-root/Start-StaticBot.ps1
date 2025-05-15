@@ -51,14 +51,16 @@ if ($Docker) {
             " -e DRIVER_BINARIES=`"$($botConfiguration.Endpoints.DriverBinaries)`""
             " -e HUB_URI=`"$($botConfiguration.Endpoints.HubUri)`""
             " -e INTERVAL_TIME=`"$($IntervalTime)`""
+            " -e SAVE_ERRORS=`"$($botConfiguration.Settings.SaveErrors)`""
+            " -e SAVE_RESPONSE=`"$($botConfiguration.Settings.SaveResponse)`""
             " -e TOKEN=`"$($botConfiguration.Metadata.Token)`""
         )
-
-        # Optionally add SAVE_OUTPUT flag when requested
-        $cmdLines += if ($SaveOutput) { " -e SAVE_OUTPUT=`"true`"" }
         
         # Publish port and assign unique container name
-        $cmdLines += " -p $($botConfiguration.Endpoints.CallbackPort):$($botConfiguration.Endpoints.CallbackPort) --name `"$($botConfiguration.Metadata.BotName)-$([guid]::NewGuid())`" g4-static-bot:latest"
+        $cmdLines += " -p $($botConfiguration.Endpoints.CallbackPort):$($botConfiguration.Endpoints.CallbackPort)"
+
+        # Set container name and tag
+        $cmdLines += " --name `"$($botConfiguration.Metadata.BotName)-$([guid]::NewGuid())`" g4-static-bot:latest"
 
         # Combine the array of arguments into one continuous string
         Write-Log -Level Verbose -UseColor -Message "Joining command parts into a single Docker command string."
@@ -77,6 +79,9 @@ if ($Docker) {
         Exit 0
     }
 }
+
+# Configure PowerShell to display informational messages (Write-Information) in the output stream
+$InformationPreference = 'Continue'
 
 # Build the bot configuration object with endpoints, metadata, and timeouts
 $bot                = Initialize-BotByConfiguration -BotConfiguration $botConfiguration
@@ -117,14 +122,10 @@ $outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
 $powerShell.Streams.Warning.add_DataAdded({
         param($s, $e)
         
-        Write-Host $s[$e.Index].Message
-
-        <#
         $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
         [Console]::ForegroundColor = [ConsoleColor]::Yellow
         [Console]::WriteLine("$($timestamp) - WRN: (Start-StaticBot) $($s[$e.Index].Message)")
         [Console]::ResetColor()
-        #>
     })
 
 # Only wire up informational relaying if the session is configured to show Information streams
@@ -158,8 +159,13 @@ $powerShell.AddScript({
         $WaitInterval
     )
 
+    # Enable debug, information, and verbose output for troubleshooting
+    $DebugPreference       = 'Continue'
+    $InformationPreference = 'Continue'
+    $VerbosePreference     = 'Continue'
+
     # Loop until the callback listener runspace completes
-    while((-not $botCallbackJob.AsyncResult.IsCompleted -and $botCallbackJob.Runner.InvocationStateInfo.State -eq 'Running')) {
+    while((-not $BotCallbackJob.AsyncResult.IsCompleted -and $BotCallbackJob.Runner.InvocationStateInfo.State -eq 'Running')) {
         try {
             # Check if the automation file exists; if not, wait and retry
             if (-Not (& $TestBotFile -BotFilePath $BotAutomationFile)) {
@@ -259,12 +265,5 @@ Write-Host "Starting bot '$($BotName)' loop with '$($IntervalTime)' seconds inte
 
 # Loop until the callback listener runspace completes
 while ((-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runner.InvocationStateInfo.State -eq 'Running') -and (-not $async.IsCompleted -and $powerShell.InvocationStateInfo.State -eq 'Running')) {
-    try {
-        Start-Sleep -Seconds 3
-    }
-    catch {
-        # Catch any unexpected errors, log a warning, and wait before retry
-        Write-Log -Level Error -Message "(Start-StaticBot) $($_)" -UseColor
-        Start-Sleep -Seconds 3
-    }
+    Start-Sleep -Seconds 3
 }

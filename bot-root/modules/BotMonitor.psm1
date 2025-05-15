@@ -176,70 +176,109 @@ $startBotCallbackListener = {
     # Define the listener logic, now accepting Prefix and BotId
     $powerShell.AddScript({
         param(
-            $Prefix,  # The HTTP listener prefix
-            $BotId    # BotId to validate in incoming request paths
+            $BotId,
+            $Listener,
+            $Prefix   
         )
 
-        try {
-            # Instantiate and start the HTTP listener
-            $listener = New-Object System.Net.HttpListener
-            $listener.Prefixes.Add($Prefix) 
-            $listener.Start()
+        # Default to successful exit unless an error occurs
+        $exitCode = 0
 
-            # Loop forever, handling each incoming HTTP request
+        try {
+            # Add the listener prefix URI (e.g., http://*:54256/) to the listener
+            $Listener.Prefixes.Add($Prefix) 
+
+            # Start the HTTP listener to begin accepting requests
+            $Listener.Start()
+
+            # Enter the main loop to handle incoming HTTP requests
             while ($true) {
+                # Wait for an incoming HTTP request and get the context
                 $context = $listener.GetContext()
 
                 # Reject requests from other bots sharing this listener port
-                # Only allow requests whose path exactly matches /bot/v1/monitor/<BotId>               
+                # Only allow requests whose path exactly matches /bot/v1/monitor/<BotId>
                 if ($context.Request.Url.AbsolutePath -notcontains "/bot/v1/monitor/$($BotId)") {
                     Write-Warning "(Start-BotCallbackListener) Request path '$($context.Request.Url.AbsolutePath)' does not match '/bot/v1/monitor/$($BotId)'; Returning 403 Forbidden."
-                    $context.Response.StatusCode = 403
+                    $context.Response.StatusCode = 403  # Forbidden
                     $context.Response.Close()
-                    continue
+                    continue  # Continue listening for other requests
                 }
 
-                # Handle allowed path based on HTTP method
+                # Handle the request based on the HTTP method used
                 switch ($context.Request.HttpMethod) {
                     'DELETE' {
-                        # Client requested shutdown: send 204 No Content and exit successfully
+                        # Client explicitly requested the bot to shut down
                         Write-Warning "Received DELETE on '/bot/v1/monitor/$($BotId)'; Shutting down..."
-                        $context.Response.StatusCode = 204
+                        $context.Response.StatusCode = 204  # No Content
                         $context.Response.Close()
-                        exit 0
+                        exit 0  # Exit successfully
                     }
                     'GET' {
-                        # Health check: send 200 OK and continue listening
+                        # Health check ping
                         Write-Information "Health check received on '/bot/v1/monitor/$($BotId)'; Returning 200 OK."
-                        $context.Response.StatusCode = 200
+                        $context.Response.StatusCode = 200  # OK
                         $context.Response.Close()
-                        continue
+                        continue  # Continue listening
                     }
                     default {
-                        # Unsupported method: send 405 Method Not Allowed
+                        # Any other HTTP method is not supported
                         Write-Warning "Unsupported HTTP method '$($context.Request.HttpMethod)' on '/bot/v1/monitor/$($BotId)'; Returning 405 Method Not Allowed."
-                        $context.Response.StatusCode = 405
+                        $context.Response.StatusCode = 405  # Method Not Allowed
                         $context.Response.Close()
                     }
                 }
             }
         }
         catch {
-            # On any exception, exit with error code
-            Write-Warning "Callback listener exception: $($_.Exception.Message); Exiting with error code 1."
-            exit 1
+            # Define the expected message that signals a graceful listener shutdown
+            $exitMessage = "The I/O operation has been aborted because of either a thread exit or an application request"
+
+            # Determine whether the exception was caused by a graceful shutdown
+            $isGraceful  = $_.Exception.Message.Contains('Exception calling "GetContext" with "0" argument(s)')
+
+            if ($isGraceful) {
+                # If it's a known graceful shutdown message, log and exit successfully
+                Write-Information $exitMessage
+                exit $exitCode
+            }
+
+            # Otherwise, log the unexpected error message and prepare to exit with an error
+            Write-Warning "$($_.Exception.Message)"
+            $exitCode = 1
         }
         finally {
-            # Always clean up the listener to free the port
-            $listener.Stop()
-            $listener.Close()
-            exit 0
+            try {
+                # Ensure the listener is stopped and closed, even if an error occurred
+                if ($null -ne $Listener) {
+                    $Listener.Stop()
+                    $Listener.Close()
+                }
+            }
+            catch {
+                # Log cleanup issues at debug level since they are non-critical
+                Write-Debug "(Start-BotCallbackListener) $($_.Exception.Message)"
+            }
         }
+
+        # Final logging based on how the process exited
+        if ($exitCode -eq 0) {
+            Write-Information "(Start-BotCallbackListener) Exiting gracefully with status 0"
+        } else {
+            Write-Warning "(Start-BotCallbackListener) Exiting due to unexpected error with status $($exitCode)"
+        }
+
+        # Exit with the appropriate status code
+        exit $exitCode
     })
 
+    # Initialize the callback http listener
+    $listener = New-Object System.Net.HttpListener
+
     # Pass the Prefix and BotId arguments into the scriptblock
-    $powerShell.AddArgument($Prefix)
     $powerShell.AddArgument($BotId)
+    $powerShell.AddArgument($listener)
+    $powerShell.AddArgument($Prefix)
     
     # Start the runspace asynchronously, capturing the IAsyncResult
     $async = $powerShell.BeginInvoke($inputBuffer, $outputBuffer)
@@ -249,6 +288,7 @@ $startBotCallbackListener = {
         Runner       = $powerShell
         AsyncResult  = $async
         InputBuffer  = $inputBuffer
+        HttpListener = $listener
         OutputBuffer = $outputBuffer
     }
 }

@@ -1,240 +1,200 @@
-<#
-.SYNOPSIS
-    Reads an 'automation.json' file, sends its Base64-encoded contents to a remote endpoint,
-    and saves the response along with any errors.
-
-.DESCRIPTION
-    This script performs the following actions:
-    1. Searches for a subfolder named after $BotName within the specified $BotVolume.
-    2. Locates the 'automation.json' file within the "bot" subdirectory of the bot folder.
-    3. Reads the file, converts its content to JSON, updates the 'driverBinaries' property,
-       converts the JSON back to a string, and encodes the string in Base64.
-    4. Sends the Base64-encoded string via a POST request to the remote endpoint at $HubUri,
-       appending the '/api/v4/g4/automation/base64/invoke' path.
-    5. Saves the JSON response in an 'output' directory with a timestamped filename.
-    6. Records any errors in an 'errors' directory.
-    Note: This script executes once and does not loop indefinitely.
-
-.NOTES
-    - Designed for demonstration and automation testing.
-    - Requires PowerShell 5.1+ (or higher).
-
-.PARAMETER BotVolume
-    The main folder path where the bot's subfolder resides.
-
-.PARAMETER BotName
-    The name of the bot's subfolder. This folder should contain a "bot" subdirectory that includes 'automation.json'.
-
-.PARAMETER CronSchedules
-    The comma-separated cron schedules used for scheduling the automation jobs.
-
-.PARAMETER DriverBinaries
-    The URL to the driver binaries that will be inserted into the automation JSON.
-
-.PARAMETER HubUri
-    The base URI of the remote service (e.g., http://host.docker.internal:9944).
-
-.PARAMETER Token
-    The authentication token required for the bot's operation.
-    This token is injected into the automation JSON's 'authentication.token' property,
-    enabling the bot to run, and is also passed to the Docker container if running in Docker mode.
-
-.PARAMETER Docker
-    Switch to run the script inside a Docker container environment.
-
-.EXAMPLE
-    .\LoopScript.ps1 -BotVolume "E:\Garbage\bot-volume" -BotName "demo-bot" -CronSchedules "*/5 * * * *,30 8 * * *,0 18 * * *" -DriverBinaries "http://host.docker.internal:4444/wd/hub" -HubUri "http://host.docker.internal:9944" -Docker
-#>
 param (
     [CmdletBinding()]
-    [Parameter(Mandatory = $true)] [string]$BotVolume,
-    [Parameter(Mandatory = $true)] [string]$BotName,
-    [Parameter(Mandatory = $false)][string]$CronSchedules='* * * * *',
-    [Parameter(Mandatory = $true)] [string]$DriverBinaries,
-    [Parameter(Mandatory = $true)] [string]$HubUri,
-    [Parameter(Mandatory = $true)] [string]$Token,
-    [Parameter(Mandatory = $false)][switch]$Docker
+    [Parameter(Mandatory = $false)] [string] $BotId,
+    [Parameter(Mandatory = $true)]  [string] $BotName,
+    [Parameter(Mandatory = $true)]  [string] $BotVolume,
+    [Parameter(Mandatory = $false)] [string] $CallbackIngress,
+    [Parameter(Mandatory = $false)] [string] $CallbackUri,
+    [Parameter(Mandatory = $false)] [string] $CronSchedules='* * * * *',
+    [Parameter(Mandatory = $true)]  [string] $DriverBinaries,
+    [Parameter(Mandatory = $true)]  [string] $HubUri,
+    [Parameter(Mandatory = $false)] [string] $Token,
+    [Parameter(Mandatory = $false)] [switch] $Docker
 )
 
-function Import-EnvironmentVariablesFile {
-    <#
-    .SYNOPSIS
-        Imports environment variables from an environment file and additional parameters into the current session.
+# Change to the script's own directory so any relative paths resolve correctly
+Set-Location -Path $PSScriptRoot
 
-    .DESCRIPTION
-        This function reads an environment file (each line formatted as KEY=value) and splits each line on the first "=".
-        In addition, it accepts an array of additional environment variable strings (AdditionalEnvironmentVariables) in key=value format.
-        Both sets of key-value pairs are imported into the current session's environment.
-        Any keys specified in SkipNames are skipped.
+# Import the setup and common modules for bot initialization and utilities
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotSetup.psm1'))  -Force
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotLogger.psm1')) -Force
 
-    .PARAMETER EnvironmentFilePath
-        The full path to the environment file. Defaults to ".env" in the script's directory.
+# Return to the script directory (in case module import changed location)
+Set-Location -Path $PSScriptRoot
 
-    .PARAMETER SkipNames
-        An array of environment variable names that should not be imported from the file or the additional parameters.
+# Build the bot's configuration object (endpoints, metadata, timeouts)
+$botConfiguration = New-BotConfiguration `
+    -BotId               $BotId `
+    -BotName             $BotName `
+    -BotType             'cron-bot' `
+    -BotVolume           $BotVolume `
+    -CallbackIngress     $CallbackIngress `
+    -CallbackUri         $CallbackUri `
+    -DriverBinaries      $DriverBinaries `
+    -EnvironmentFilePath (Join-Path $PSScriptRoot ".env") `
+    -HubUri              $HubUri `
+    -Token               $Token
 
-    .PARAMETER AdditionalEnvironmentVariables
-        An array of additional environment variable strings in key=value format.
-        
-    .EXAMPLE
-        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME" `
-            -AdditionalEnvironmentVariables @("MY_VAR=Value1", "OTHER_VAR=Value2")
-    #>
-    [CmdletBinding()]
-    param(
-        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
-        [string[]]$SkipNames                      = @(),
-        [string[]]$AdditionalEnvironmentVariables = @()
-    )
-
-    Write-Verbose "Check if the environment file exists; if not, display a message and exit"
-    if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Warning "The environment file was not found at path: $($EnvironmentFilePath)"
-        return
-    }
-
-    Write-Verbose "Read the environment file line by line"
-    $parametersCollection = (Get-Content $EnvironmentFilePath -Force -Encoding UTF8) + $AdditionalEnvironmentVariables
-    $parametersCollection | ForEach-Object {
-        Write-Verbose "Skip lines that are comments (starting with '#') or empty after trimming whitespace"
-        if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
-            return
-        }
-
-        Write-Verbose "Split the line into two parts at the first '=' occurrence"
-        $parts = $_.Split('=', 2)
-        
-        Write-Verbose "If the line does not contain exactly two parts, skip it"
-        if ($parts.Length -ne 2) {
-            return
-        }
-        
-        Write-Verbose "Trim any leading or trailing whitespace from the key and value"
-        $key   = $parts[0].Trim()
-        $value = $parts[1].Trim()
-
-        # Skip this key if it is in the skip list.
-        if ($SkipNames -contains $key) {
-            Write-Verbose "Skipping environment variable '$($key)' as it is in the skip list"
-            return
-        }
-        
-        Set-Item -Path "Env:$($key)" -Value $value
-        Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
-    }
-}
-
-# If the Docker switch is provided, attempt to start the Docker container and exit.
+# Only proceed if Docker support is enabled
 if ($Docker) {
     try {
-        Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$($BotName)'."
-        Write-Verbose "Building the Docker command from the specified parameters."
-        $cmdLines = @(
-            "run -d -v `"$($BotVolume):/bots`"",
-            " -e BOT_NAME=`"$($BotName)`"",
-            " -e CRON_SCHEDULES=`"$($CronSchedules)`"",
-            " -e DRIVER_BINARIES=`"$($DriverBinaries)`"",
-            " -e HUB_URI=`"$($HubUri)`"",
-            " -e TOKEN=`"$($Token)`"",
-            " --name `"$($BotName)-$([guid]::NewGuid())`" g4-cron-bot:latest"
-        )
+        Write-Log -Level Verbose -UseColor -Message "Docker switch is enabled. Preparing to launch Docker container for bot '$($botConfiguration.Metadata.BotName)'."
+        Write-Log -Level Verbose -UseColor -Message "Building the Docker command from the specified parameters."
 
-        Write-Verbose "Joining command parts into a single Docker command string."
+        # Initialize an array of docker run arguments
+        $cmdLines = @(
+            "run -d -v `"$($botConfiguration.Directories.BotVolume):/bots`""
+            " -e BOT_ID=`"$($botConfiguration.Metadata.BotId)`""
+            " -e BOT_NAME=`"$($botConfiguration.Metadata.BotName)`""
+            " -e CALLBACK_INGRESS=`"$($botConfiguration.Endpoints.BotCallbackIngress)`""
+            " -e CALLBACK_URI=`"$($botConfiguration.Endpoints.BotCallbackUri)`""
+            " -e CRON_SCHEDULES=`"$($CronSchedules)`"",
+            " -e DRIVER_BINARIES=`"$($botConfiguration.Endpoints.DriverBinaries)`""
+            " -e HUB_URI=`"$($botConfiguration.Endpoints.HubUri)`""
+            " -e SAVE_ERRORS=`"$($botConfiguration.Settings.SaveErrors)`""
+            " -e SAVE_RESPONSE=`"$($botConfiguration.Settings.SaveResponse)`""
+            " -e TOKEN=`"$($botConfiguration.Metadata.Token)`""
+        )
+        
+        # Publish port and assign unique container name
+        $cmdLines += " -p $($botConfiguration.Endpoints.CallbackPort):$($botConfiguration.Endpoints.CallbackPort)"
+
+        # Set container name and tag
+        $cmdLines += " --name `"$($botConfiguration.Metadata.BotName)-$([guid]::NewGuid())`" g4-cron-bot:latest"
+
+        # Combine the array of arguments into one continuous string
+        Write-Log -Level Verbose -UseColor -Message "Joining command parts into a single Docker command string."
         $dockerCmd = $cmdLines -join [string]::Empty
 
-        Write-Host "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
+        # Wait up to 60 seconds for the container to start
+        Write-Log -Level Verbose -UseColor -Message "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
         $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
         $process.WaitForExit(60000)
-        
-        Write-Verbose "Docker container '$($BotName)' started successfully."
-        Exit 0
     }
     catch {
-        Write-Error "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
-        Exit 1
+        # Report error details on failure
+        Write-Log -Level Critical -UseColor -Message "Failed to start Docker container '$($BotName)': $($_.Exception.GetBaseException())"
+    }
+    finally{
+        Exit 0
     }
 }
 
-try {
-    Write-Verbose "Setting Environment Parameters"
-    Import-EnvironmentVariablesFile  
-}
-catch {
-    Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
-}
+# Configure PowerShell to display informational messages (Write-Information) in the output stream
+$InformationPreference = 'Continue'
 
-# Build the final request URL by removing any trailing slash from $HubUri and appending the endpoint path.
-$requestUri = "$($HubUri.TrimEnd('/'))/api/v4/g4/automation/base64/invoke"
+# Build the bot configuration object with endpoints, metadata, and timeouts
+$bot                    = Initialize-BotByConfiguration -BotConfiguration $botConfiguration
+$botAutomationDirectory = $botConfiguration.Directories.BotAutomationDirectory
+$botAutomationFile      = $botConfiguration.Directories.BotAutomationFile
+$botBase64Content       = $botConfiguration.Metadata.BotBase64Content
+$botCallbackJob         = $bot.CallbackJob
+$botOutputDirectory     = $botConfiguration.Directories.BotOutputDirectory
+$botCalculatedName      = $botConfiguration.Metadata.BotName
+$botEntryPoint          = $botConfiguration.Endpoints.BotEntryPointPrefix
+$errorsDirectory        = $botConfiguration.Directories.BotErrorsDirectory
+$instance               = $botConfiguration.Metadata.BotId
+$outputDirectory        = $botConfiguration.Directories.BotOutputDirectory
+$saveErrors             = $botConfiguration.Settings.SaveErrors
+$saveResponse           = $botConfiguration.Settings.SaveResponse
 
-# Construct the full path to the output directory where responses will be saved.
-$outputDirectory = [System.IO.Path]::Combine($BotVolume, $BotName, "output")
-
-Clear-Host
+# Display startup message and instructions
 Write-Host
-Write-Host "Starting bot process.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
-
-# Build the full path to the bot's automation file:
-# 1. Combine $BotVolume and $BotName to create the bot directory.
-# 2. Append "bot" to form the bot automation directory.
-# 3. Join "automation.json" to construct the complete file path.
-$botDirectory           = Join-Path $BotVolume $BotName
-$botAutomationDirectory = Join-Path $botDirectory "bot"
-$botFilePath            = Join-Path $botAutomationDirectory "automation.json"
+Write-Host "Starting bot '$($BotName)' process.`nPress [Ctrl] + [C] to stop bot.`n"
 
 try {
-    # Check if the 'automation.json' file exists in the bot automation directory.
-    if (-Not (Test-Path $botFilePath)) {
-        Write-Warning "File 'automation.json' not found in '$botAutomationDirectory'. Waiting for next interval."
+    # Check if the automation file exists; if not, wait and retry
+    if (-Not (Test-BotFile -BotFilePath $botAutomationFile)) {
+        Write-Log `
+            -Level   Warning `
+            -Message "(Start-CronBot) File 'automation.json' not found in '$($botAutomationDirectory)'. Waiting for next interval." `
+            -UseColor
         exit 0
     }
 
-    # Generate a unique session timestamp for file naming and session identification.
+    # Generate a unique session ID based on current timestamp
     $session = (Get-Date).ToString("yyyyMMddHHmmssfff")
     
-    # Create the output file path using the session timestamp.
-    $outputFilePath = [System.IO.Path]::Combine($outputDirectory, "$($BotName)-$($session).json")
+    # Build file paths for saving output and errors
+    $outputFilePath = [IO.Path]::Combine($OutputDirectory, "$($BotName)-$($session).json")
+    $errorFilePath  = [IO.Path]::Combine($ErrorsDirectory, "$($BotName)-$($session).json")
     
-    # Create the error file path (inside an 'errors' folder) using the session timestamp.
-    $errorsPath = [System.IO.Path]::Combine($BotVolume, $BotName, "errors", "$($BotName)-$($session).json")
+    # Notify the hub that the bot is now Working, suppressing any output
+    Update-BotStatus -BotId $instance -HubUri $HubUri -Status "Working" | Out-Null
+
+    # Send the automation request to the bot and capture its response
+    $botResponse = Send-BotAutomationRequest `
+        -HubUri         $HubUri `
+        -Base64Request  $botBase64Content
+
+    # Normalize status code to a string array, even if it's just one item
+    $statusCodes = @(@($botResponse.StatusCode) | Where-Object { -not [string]::IsNullOrWhiteSpace("$($_)") })
     
-    # Read the entire content of 'automation.json' as raw text.
-    $botFileContent = [System.IO.File]::ReadAllText($botFilePath, [System.Text.Encoding]::UTF8)
+    # Safely pick last valid status code
+    if ($statusCodes.Length -gt 0) {
+        $botStatusCodeValue = "$($statusCodes[-1])"
+    } else {
+        Write-Log `
+            -Level   Warning `
+            -Message "(Start-CronBot) Status code array contains only empty/null values. Falling back to status code 500." `
+            -UseColor
+        $botStatusCodeValue = "500"
+    }
+    
+    # Try parsing explicitly
+    $botStatusCode = 0
+    if (-not [int]::TryParse($botStatusCodeValue, [ref]$botStatusCode)) {
+        Write-Log `
+            -Level   Warning `
+            -Message "(Start-CronBot) Failed parsing status code from: $($botStatusCodeValue). Falling back to status code 500." `
+            -UseColor
+    }
+    
+    # Normalize status code to if failed to parse
+    $botStatusCode = if($botStatusCode -eq 0) { 500 } else { $botStatusCode }
+    
+    # If the bot returned an error and we should save errors, write to error file
+    if ($botStatusCode -ge 400 -and $SaveErrors) {
+        Set-Content -Value $botResponse.JsonValue -Path $errorFilePath
+    }
+    
+    # If the bot succeeded and we should save responses, write to output file
+    if ($botStatusCode -eq 200 -and $SaveResponse) {
+        Set-Content -Value $botResponse.JsonValue -Path $outputFilePath
+    }
 
-    # Convert the JSON text to an object to update the 'driverBinaries' property.
-    $botFileJson = ConvertFrom-Json $botFileContent
-
-    # Update the 'driverBinaries' property within the driverParameters object.
-    $botFileJson.driverParameters.driverBinaries = $DriverBinaries
-
-    # Update the 'token' property within the authentication object.
-    $botFileJson.authentication.token = $Token
-
-    # Convert the modified JSON object back to a JSON string with sufficient depth.
-    $botFileContent = ConvertTo-Json $botFileJson -Depth 50 -Compress
-
-    # Convert the updated JSON text to a byte array and encode it in Base64.
-    $botBytes = [System.Text.Encoding]::UTF8.GetBytes($botFileContent)
-    $botContent = [System.Convert]::ToBase64String($botBytes)
-
-    # Send the Base64-encoded string via a POST request to the remote endpoint.
-    # The timestamp in ISO 8601 format is prepended to the message.
-    Write-Verbose "$(Get-Date -Format o): Sending Base64-encoded 'automation.json' to remote endpoint..."
-    $response = Invoke-RestMethod -Uri $requestUri -Method Post -Body $botContent -ContentType "text/plain"
+    # Notify the hub that the bot is now Ready, suppressing any output
+    Update-BotStatus -BotId $instance -HubUri $HubUri -Status "Completed" | Out-Null
 }
 catch {
-    # If an error occurs, display a message and log the error details to the designated errors file.
-    $baseException = $_.Exception.GetBaseException()
-    Write-Error "An error occurred '$($baseException.Message)'.$([System.Environment]::NewLine)Check $errorsPath for details."
-    @{ error = $baseException.StackTrace; message = $baseException.Message } | ConvertTo-Json -Compress | Out-File -FilePath $errorsPath -Force -ErrorAction Continue
+    # Catch any unexpected errors that occurred during bot execution
+    # Log the full error message as a warning to highlight the failure
+    Write-Log -Level Warning -Message "(Start-CronBot) Unexpected error occurred: $($_)" -UseColor
 }
 finally {
+    # Log that cleanup of the HttpListener is starting
+    Write-Log -Level Debug -Message "(Start-CronBot) Performing cleanup and shutting down the HttpListener." -UseColor
+
+    # Check if the job object or its HttpListener is null (e.g., initialization may have failed)
+    # If so, skip shutdown and exit cleanly
+    if($null -eq $botCallbackJob -or $null -eq $botCallbackJob.HttpListener) {
+        exit 0
+    }
+
+    # Assign the HttpListener instance for cleanup
+    $listner = $botCallbackJob.HttpListener
+
     try {
-        if($null -ne $outputFilePath -and $response) {
-            $response | ConvertTo-Json -Depth 30 -Compress -ErrorAction Continue | Out-File -FilePath $outputFilePath -Force -ErrorAction Continue
-            Write-Verbose "Response successfully saved to: $outputFilePath"
-        }
+        # Attempt to stop, close, and abort the HttpListener gracefully
+        $listner.Stop()
+        $listner.Close()
+        $listner.Abort()
+
+        # Log successful shutdown
+        Write-Log -Level Information -Message "(Start-CronBot) HttpListener stopped and disposed successfully." -UseColor
     }
     catch {
-        Write-Error "Failed to save response to: $outputFilePath. Error details: $($_.Exception.GetBaseException().Message)"
+        # Log any issues that occur while shutting down the listener for debugging purposes
+        Write-Log -Level Debug -Message "(Start-CronBot) $($_.Exception.Message)" -UseColor
     }
 }

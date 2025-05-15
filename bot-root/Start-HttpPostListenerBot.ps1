@@ -196,7 +196,7 @@ $powerShell.Streams.Warning.add_DataAdded({
         
         $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
         [Console]::ForegroundColor = [ConsoleColor]::Yellow
-        [Console]::WriteLine("$($timestamp) - WRN: (Start-HttpStaticListenerBot) $($s[$e.Index].Message)")
+        [Console]::WriteLine("$($timestamp) - WRN: (Start-HttpPostListenerBot) $($s[$e.Index].Message)")
         [Console]::ResetColor()
     })
 
@@ -207,7 +207,7 @@ if ($InformationPreference -eq 'Continue') {
             param($s, $e)
 
             $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-            [Console]::WriteLine("$($timestamp) - INF: (Start-HttpStaticListenerBot) $($s[$e.Index].MessageData)")
+            [Console]::WriteLine("$($timestamp) - INF: (Start-HttpPostListenerBot) $($s[$e.Index].MessageData)")
         })
     }
 
@@ -444,14 +444,7 @@ Write-Host "`nListening for incoming http requests for bot '$($BotName)' on uri 
 
 # Loop until the callback listener runspace completes
 while ((-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runner.InvocationStateInfo.State -eq 'Running') -and (-not $async.IsCompleted -and $powerShell.InvocationStateInfo.State -eq 'Running')) {
-    try {
-        Start-Sleep -Seconds 3
-    }
-    catch {
-        # Catch any unexpected errors, log a warning, and wait before retry
-        Write-Log -Level Error -Message "(Start-HttpStaticListenerBot) $($_)" -UseColor
-        Start-Sleep -Seconds 3
-    }
+    Start-Sleep -Seconds 3
 }
 
 # Teardown the HTTP listener to stop accepting requests and release resources

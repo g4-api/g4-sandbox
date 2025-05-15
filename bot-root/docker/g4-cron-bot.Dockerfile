@@ -31,6 +31,7 @@ WORKDIR /app
 # Copy the PowerShell script and .env file into the container
 COPY .env /app/.env
 COPY Start-CronBot.ps1 /app/Start-CronBot.ps1
+COPY modules /app/modules/
 
 # Make the PowerShell script executable (optional good practice)
 RUN chmod +x /app/Start-CronBot.ps1
@@ -42,7 +43,10 @@ mkdir -p /etc/cron.d\n\
 \n\
 # Echo loaded parameters to confirm they are set correctly\n\
 echo "Loaded parameters:"\n\
+echo "BOT_ID: ${BOT_ID}"\n\
 echo "BOT_NAME: ${BOT_NAME}"\n\
+echo "CALLBACK_INGRESS: ${CALLBACK_INGRESS}"\n\
+echo "CALLBACK_URI: ${CALLBACK_URI}"\n\
 echo "CRON_SCHEDULES: ${CRON_SCHEDULES}"\n\
 echo "DRIVER_BINARIES: ${DRIVER_BINARIES}"\n\
 echo "HUB_URI: ${HUB_URI}"\n\
@@ -54,7 +58,7 @@ CRON_FILE="/etc/cron.d/${BOT_NAME}-cron"\n\
 # Create cron job file dynamically from the CRON_SCHEDULES environment variable\n\
 IFS="," read -ra SCHEDULES <<< "$CRON_SCHEDULES"\n\
 for schedule in "${SCHEDULES[@]}"; do\n\
-  echo "$schedule pwsh /app/Start-CronBot.ps1 -BotVolume '/bots' -BotName '\$BOT_NAME' -DriverBinaries '\$DRIVER_BINARIES' -HubUri '\$HUB_URI' -Token '\$TOKEN' >> /var/log/cron.log 2>&1" >> $CRON_FILE\n\
+  echo "$schedule pwsh /app/Start-CronBot.ps1 -BotId '\$BOT_ID' -BotName '\$BOT_NAME' -BotVolume '/bots' -CallbackIngress '\$CALLBACK_INGRESS' -CallbackUri '\$CALLBACK_URI' -DriverBinaries '\$DRIVER_BINARIES' -HubUri '\$HUB_URI' -Token '\$TOKEN' >> /var/log/cron.log 2>&1" >> $CRON_FILE\n\
 done\n\
 \n\
 # Set proper permissions for the cron job file\n\

@@ -355,14 +355,7 @@ Write-Host "`nListening for incoming http requests for bot '$($BotName)' on uri 
 
 # Loop until the callback listener runspace completes
 while ((-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runner.InvocationStateInfo.State -eq 'Running') -and (-not $async.IsCompleted -and $powerShell.InvocationStateInfo.State -eq 'Running')) {
-    try {
-        Start-Sleep -Seconds 3
-    }
-    catch {
-        # Catch any unexpected errors, log a warning, and wait before retry
-        Write-Log -Level Error -Message "(Start-HttpStaticListenerBot) $($_)" -UseColor
-        Start-Sleep -Seconds 3
-    }
+    Start-Sleep -Seconds 3
 }
 
 # Teardown the HTTP listener to stop accepting requests and release resources
