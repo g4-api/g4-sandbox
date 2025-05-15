@@ -808,7 +808,7 @@ function Start-BotWatchDog {
 
                 # 2. Check the bot's current state: skip registration if already READY/WORKING
                 $statusResult = & $TestBotConnection -Uri $statusUri
-                if ($statusResult.BotStatus.ToUpper() -in 'READY','WORKING') {
+                if ($statusResult.BotStatus.ToUpper() -in 'READY','WORKING','COMPLETE') {
                     Write-Information "Bot at '$($statusUri)' is '$($statusResult.BotStatus)'; Skipping Registration."
                     Start-Sleep -Seconds $PollingInterval
                     continue
@@ -836,6 +836,7 @@ function Start-BotWatchDog {
 
                 # 5. On success, inform
                 Write-Information "Bot '$($BotName); $($BotId)' successfully registered."
+                Start-Sleep -Seconds $PollingInterval
             }
             catch {
                 Write-Warning "$($_)"
