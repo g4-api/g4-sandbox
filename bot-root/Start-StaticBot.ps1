@@ -7,7 +7,7 @@ param (
     [Parameter(Mandatory = $false)] [string] $CallbackUri,
     [Parameter(Mandatory = $true)]  [string] $DriverBinaries,
     [Parameter(Mandatory = $true)]  [string] $HubUri,
-    [Parameter(Mandatory = $true)]  [string] $IntervalTime,
+    [Parameter(Mandatory = $true)]  [int]    $IntervalTime,
     [Parameter(Mandatory = $false)] [string] $Token,
     [Parameter(Mandatory = $false)] [switch] $Docker
 )
@@ -50,9 +50,9 @@ if ($Docker) {
             " -e CALLBACK_URI=`"$($botConfiguration.Endpoints.BotCallbackUri)`""
             " -e DRIVER_BINARIES=`"$($botConfiguration.Endpoints.DriverBinaries)`""
             " -e HUB_URI=`"$($botConfiguration.Endpoints.HubUri)`""
-            " -e INTERVAL_TIME=`"$($IntervalTime)`""
             " -e SAVE_ERRORS=`"$($botConfiguration.Settings.SaveErrors)`""
             " -e SAVE_RESPONSE=`"$($botConfiguration.Settings.SaveResponse)`""
+            " -e STATIC_BOT_INTERVAL_TIME=`"$($IntervalTime)`""
             " -e TOKEN=`"$($botConfiguration.Metadata.Token)`""
         )
         
@@ -121,10 +121,13 @@ $outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
 # Relay warnings from the runspace
 $powerShell.Streams.Warning.add_DataAdded({
         param($s, $e)
-        
+
         $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+        $message   = "$($s[$e.Index].Message)"
+        $message   = if($message.Contains(" - WRN:")) { $message } else { "$($timestamp) - WRN: (Start-StaticBot) $($s[$e.Index].Message)" }
+        
         [Console]::ForegroundColor = [ConsoleColor]::Yellow
-        [Console]::WriteLine("$($timestamp) - WRN: (Start-StaticBot) $($s[$e.Index].Message)")
+        [Console]::WriteLine($message)
         [Console]::ResetColor()
     })
 
@@ -135,7 +138,10 @@ if ($InformationPreference -eq 'Continue') {
             param($s, $e)
 
             $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-            [Console]::WriteLine("$($timestamp) - INF: (Start-StaticBot) $($s[$e.Index].MessageData)")
+            $message   = "$($s[$e.Index].MessageData)"
+            $message   = if($message.Contains(" - INF:")) { $message } else { "$($timestamp) - INF: (Start-StaticBot) $($s[$e.Index].MessageData)" }
+
+            [Console]::WriteLine($message)
         })
     }
 

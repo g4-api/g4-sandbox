@@ -1603,28 +1603,12 @@ function Start-PartitionCleanupBotWizard {
     # Default, Description, Mandatory, and Name.
     $wizardParameters = @(
         [ordered]@{
-            Default          = ""
-            Description      = "The root directory where the bot will operate."
-            EnvironmentValue = $env:BOT_VOLUME
-            Mandatory        = $true
-            Name             = "BotVolume"
-            Type             = "String"
-        },
-        [ordered]@{
             Default          = 86400
-            Description      = "The time interval (in seconds) between cleanup cycles."
+            Description      = "The interval (in seconds) between each bot call."
             EnvironmentValue = $env:CLEANUP_BOT_INTERVAL_TIME
             Mandatory        = $true
             Name             = "IntervalTime"
             Type             = "Number"
-        },
-        [ordered]@{
-            Default          = "http://localhost:9944"
-            Description      = "The base URI of the G4 Hub endpoint to which automation configurations are sent."
-            EnvironmentValue = $env:G4_HUB_URI
-            Mandatory        = $true
-            Name             = "HubUri"
-            Type             = "String"
         },
         [ordered]@{
             Default          = 3
@@ -1633,32 +1617,8 @@ function Start-PartitionCleanupBotWizard {
             Mandatory        = $true
             Name             = "NumberOfFilesToRetain"
             Type             = "Number"
-        },
-        [ordered]@{
-            Default          = 8085
-            Description      = "The port used by the background job's HTTP listener to receive incoming requests."
-            EnvironmentValue = $env:G4_LISTENER_PORT
-            Mandatory        = $true
-            Name             = "ListenerPort"
-            Type             = "Number"
-        },
-        [ordered]@{
-            Default          = $false
-            Description      = "Indicates whether to run using the latest Docker image (enter 'Y' for yes; default is no)."
-            EnvironmentValue = ""
-            Mandatory        = $false
-            Name             = "Docker"
-            Type             = "Switch"
-        },
-        [ordered]@{
-            Default          = "Normal"
-            Description      = "Determines the PowerShell console window's display mode when running the bot. Valid values are 'Normal', 'Minimized', 'Maximized', or 'Hidden' (use this to suppress the console window altogether)."
-            EnvironmentValue = $env:G4_BOT_WINDOW_STYLE
-            Mandatory        = $false
-            Name             = "WindowStyle"
-            Type             = "String"
         }
-    )
+    ) + ($commonParameters | Where-Object { $_.Name -notin @('DriverBinaries', 'BotName') })
 
     # Call the Show-Wizard function with the specified title, wizard parameters, and script.
     Show-Wizard `

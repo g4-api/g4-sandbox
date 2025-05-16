@@ -32,7 +32,7 @@ RUN echo "BOT_ID: ${BOT_ID}" && \
     echo "CALLBACK_URI: ${CALLBACK_URI}" && \
     echo "DRIVER_BINARIES: ${DRIVER_BINARIES}" && \
     echo "HUB_URI: ${HUB_URI}" && \    
-    echo "INTERVAL_TIME: ${INTERVAL_TIME}" && \
+    echo "INTERVAL_TIME: ${FILE_LISTENER_BOT_INTERVAL_TIME}" && \
     echo "TOKEN: ${TOKEN}"
 
 # Create the /bots directory and ensure it has read/write permissions
@@ -58,5 +58,5 @@ ENTRYPOINT pwsh -NoLogo -File ./Start-FileListenerBot.ps1 \
   -CallbackUri     "$CALLBACK_URI" \
   -DriverBinaries  "$DRIVER_BINARIES" \
   -HubUri          "$HUB_URI" \
-  -IntervalTime    "$INTERVAL_TIME" \
+  -IntervalTime    $FILE_LISTENER_BOT_INTERVAL_TIME \
   -Token           "$TOKEN"

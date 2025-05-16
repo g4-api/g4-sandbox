@@ -47,7 +47,7 @@ echo "BOT_ID: ${BOT_ID}"\n\
 echo "BOT_NAME: ${BOT_NAME}"\n\
 echo "CALLBACK_INGRESS: ${CALLBACK_INGRESS}"\n\
 echo "CALLBACK_URI: ${CALLBACK_URI}"\n\
-echo "CRON_SCHEDULES: ${CRON_SCHEDULES}"\n\
+echo "CRON_BOT_SCHEDULES: ${CRON_BOT_SCHEDULES}"\n\
 echo "DRIVER_BINARIES: ${DRIVER_BINARIES}"\n\
 echo "HUB_URI: ${HUB_URI}"\n\
 echo "TOKEN: ${TOKEN}"\n\
@@ -55,8 +55,8 @@ echo "TOKEN: ${TOKEN}"\n\
 # Define the cron file name dynamically based on BOT_NAME\n\
 CRON_FILE="/etc/cron.d/${BOT_NAME}-cron"\n\
 \n\
-# Create cron job file dynamically from the CRON_SCHEDULES environment variable\n\
-IFS="," read -ra SCHEDULES <<< "$CRON_SCHEDULES"\n\
+# Create cron job file dynamically from the CRON_BOT_SCHEDULES environment variable\n\
+IFS="," read -ra SCHEDULES <<< "$CRON_BOT_SCHEDULES"\n\
 for schedule in "${SCHEDULES[@]}"; do\n\
   echo "$schedule pwsh /app/Start-CronBot.ps1 -BotId '\$BOT_ID' -BotName '\$BOT_NAME' -BotVolume '/bots' -CallbackIngress '\$CALLBACK_INGRESS' -CallbackUri '\$CALLBACK_URI' -DriverBinaries '\$DRIVER_BINARIES' -HubUri '\$HUB_URI' -Token '\$TOKEN' >> /var/log/cron.log 2>&1" >> $CRON_FILE\n\
 done\n\

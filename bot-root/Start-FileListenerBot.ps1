@@ -7,7 +7,7 @@ param (
     [Parameter(Mandatory = $false)] [string] $CallbackUri,
     [Parameter(Mandatory = $true)]  [string] $DriverBinaries,
     [Parameter(Mandatory = $true)]  [string] $HubUri,
-    [Parameter(Mandatory = $true)]  [string] $IntervalTime,
+    [Parameter(Mandatory = $true)]  [int]    $IntervalTime,
     [Parameter(Mandatory = $false)] [string] $Token,
     [Parameter(Mandatory = $false)] [switch] $Docker
 )
@@ -49,8 +49,8 @@ if ($Docker) {
             " -e CALLBACK_INGRESS=`"$($botConfiguration.Endpoints.BotCallbackIngress)`""
             " -e CALLBACK_URI=`"$($botConfiguration.Endpoints.BotCallbackUri)`""
             " -e DRIVER_BINARIES=`"$($botConfiguration.Endpoints.DriverBinaries)`""
+            " -e FILE_LISTENER_BOT_INTERVAL_TIME=`"$($IntervalTime)`""
             " -e HUB_URI=`"$($botConfiguration.Endpoints.HubUri)`""
-            " -e INTERVAL_TIME=`"$($IntervalTime)`""
             " -e SAVE_ERRORS=`"$($botConfiguration.Settings.SaveErrors)`""
             " -e SAVE_RESPONSE=`"$($botConfiguration.Settings.SaveResponse)`""
             " -e TOKEN=`"$($botConfiguration.Metadata.Token)`""

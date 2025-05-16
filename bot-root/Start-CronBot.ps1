@@ -48,7 +48,7 @@ if ($Docker) {
             " -e BOT_NAME=`"$($botConfiguration.Metadata.BotName)`""
             " -e CALLBACK_INGRESS=`"$($botConfiguration.Endpoints.BotCallbackIngress)`""
             " -e CALLBACK_URI=`"$($botConfiguration.Endpoints.BotCallbackUri)`""
-            " -e CRON_SCHEDULES=`"$($CronSchedules)`"",
+            " -e CRON_BOT_SCHEDULES=`"$($CronSchedules)`"",
             " -e DRIVER_BINARIES=`"$($botConfiguration.Endpoints.DriverBinaries)`""
             " -e HUB_URI=`"$($botConfiguration.Endpoints.HubUri)`""
             " -e SAVE_ERRORS=`"$($botConfiguration.Settings.SaveErrors)`""

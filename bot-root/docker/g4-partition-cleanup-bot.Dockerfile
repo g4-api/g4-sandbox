@@ -2,7 +2,7 @@
 FROM ubuntu:24.04
 
 # Expose the internal port which will be used by the listener
-EXPOSE 8085
+EXPOSE 9213
 
 # Prevent interactive dialogs during package install
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,7 +12,7 @@ ENV TERM=xterm
 
 # Install prerequisites
 RUN apt-get update && \
-    apt-get install -y wget apt-transport-https software-properties-common gnupg && \
+    apt-get install -y wget apt-transport-https software-properties-common gnupg curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and install Microsoft repository GPG keys
@@ -26,10 +26,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Echo the variables in the desired format during build
-RUN echo "CLEANUP_BOT_INTERVAL_TIME: ${CLEANUP_BOT_INTERVAL_TIME}" && \
-    echo "CLEANUP_BOT_NUNBER_OF_FILES: ${CLEANUP_BOT_NUNBER_OF_FILES}" && \
+RUN echo "BOT_ID: ${BOT_ID}" && \
+    echo "CALLBACK_INGRESS: ${CALLBACK_INGRESS}" && \
+    echo "CALLBACK_URI: ${CALLBACK_URI}" && \
     echo "HUB_URI: ${HUB_URI}" && \
-    echo "LISTENER_PORT: ${LISTENER_PORT}"
+    echo "INTERVAL_TIME: ${CLEANUP_BOT_INTERVAL_TIME}" && \
+    echo "NUNBER_OF_FILES: ${CLEANUP_BOT_NUNBER_OF_FILES}" && \
+    echo "TOKEN: ${TOKEN}"
 
 # Create the /bots directory and ensure it has read/write permissions
 RUN mkdir -p /bots && chmod 777 /bots
@@ -45,9 +48,13 @@ COPY modules /app/modules/
 # Make script executable (optional good practice)
 RUN chmod +x /app/Start-CleanupBot.ps1
 
-# Pass four parameters to the script:
-#   1) The bot volume location (/bot)
-#   2) BotName from environment variable
-#   3) HubUri from environment variable
-#   4) IntervalTime from environment variable
-CMD ["pwsh", "-Command", "./Start-CleanupBot.ps1 /bots $env:CLEANUP_BOT_INTERVAL_TIME $env:HUB_URI $env:LISTENER_PORT $env:CLEANUP_BOT_NUNBER_OF_FILES"]
+SHELL ["/bin/sh", "-c"]
+ENTRYPOINT pwsh -NoLogo -File ./Start-CleanupBot.ps1 \
+  -BotId                 "$BOT_ID" \
+  -BotVolume             "/bots" \
+  -CallbackIngress       "$CALLBACK_INGRESS" \
+  -CallbackUri           "$CALLBACK_URI" \
+  -HubUri                "$HUB_URI" \
+  -IntervalTime          $CLEANUP_BOT_INTERVAL_TIME \
+  -NumberOfFilesToRetain $CLEANUP_BOT_NUNBER_OF_FILES \
+  -Token                 "$TOKEN"

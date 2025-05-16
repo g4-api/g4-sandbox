@@ -21,9 +21,9 @@ services:
       <<: *common-env
       BOT_ID: "1747331681414"
       BOT_NAME: "g4-cron-bot"
-      CALLBACK_INGRESS: "http://192.168.1.13:49213"
-      CALLBACK_URI: "http://192.168.1.13:49213"
-      CRON_SCHEDULES: "* * * * *,*/5 * * * *"
+      CALLBACK_INGRESS: "http://host.docker.internal:49213"
+      CALLBACK_URI: "http://host.docker.internal:49213"
+      CRON_BOT_SCHEDULES: "* * * * *,*/5 * * * *"
       DRIVER_BINARIES: "http://host.docker.internal:4444/wd/hub"
       HUB_URI: "http://host.docker.internal:9944"
       SAVE_ERRORS: "True"
@@ -44,8 +44,8 @@ services:
       <<: *common-env
       BOT_ID: "1747331681415"
       BOT_NAME: "g4-cron-bot"
-      CALLBACK_INGRESS: "http://192.168.1.13:49214"
-      CALLBACK_URI: "http://192.168.1.13:49214"
+      CALLBACK_INGRESS: "http://host.docker.internal:49214"
+      CALLBACK_URI: "http://host.docker.internal:49214"
       CRON_SCHEDULES: "* * * * *,*/10 * * * *"
       DRIVER_BINARIES: "http://host.docker.internal:4444/wd/hub"
       HUB_URI: "http://host.docker.internal:9944"

@@ -29,11 +29,11 @@ services:
     volumes:
       - C:/g4-bots-volume:/bots
     environment:
-      BOT_NAME:         "g4-static-bot"
-      CALLBACK_INGRESS: "http://host.docker.internal:54252"
-      DRIVER_BINARIES:  "http://host.docker.internal:4444/wd/hub"
-      HUB_URI:          "http://host.docker.internal:9944"
-      INTERVAL_TIME:    "5"
+      BOT_NAME:                 "g4-static-bot"
+      CALLBACK_INGRESS:         "http://host.docker.internal:54252"
+      DRIVER_BINARIES:          "http://host.docker.internal:4444/wd/hub"
+      HUB_URI:                  "http://host.docker.internal:9944"
+      STATIC_BOT_INTERVAL_TIME: "5"
       TOKEN: >-
         3xezq5Yc33laNOPNP8yCsK33vQcQZ87E/zyLNNscYNeqvKTHAm9C3wAEDQV7X9+
         fuuHPhafDNXbSFgsbKmCncCKm7DRE5A6JtFSd90DNujujbQ3vLG4/4uSVCR76Z6VguIDSvRZ/

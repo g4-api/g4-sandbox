@@ -1,386 +1,307 @@
-<#
-.SYNOPSIS
-    Automated cleanup script for removing old files from specified directories on a BotVolume.
-
-.DESCRIPTION
-    This script scans the specified BotVolume for target directories ("archive", "output", "errors") 
-    and for temporary directories named ".tmp". It retains only the newest files up to the 
-    specified NumberOfFilesToRetain per target folder and removes the rest. The script runs continuously, 
-    pausing between cycles as defined by the IntervalTime parameter.
-
-.PARAMETER BotVolume
-    The path to the volume where the cleanup will be performed. This parameter is mandatory.
-
-.PARAMETER NumberOfFilesToRetain
-    Specifies the number of newest files to retain per target folder. Must be an integer greater than 0.
-
-.PARAMETER IntervalTime
-    Specifies the time interval (in seconds) between cleanup cycles. Must be an integer greater than 0.
-
-.PARAMETER Docker
-    Switch to run the script inside a Docker container. When specified, the script will launch a Docker container
-    using the given parameters and then exit.
-
-.EXAMPLE
-    .\CleanupScript.ps1 -BotVolume "D:\BotData" -NumberOfFilesToRetain 10 -IntervalTime 300
-
-    This command runs the cleanup on the D:\BotData volume, retaining the 10 newest files in each target folder, 
-    and waits 5 minutes between each run.
-
-.NOTES
-    Designed to be run manually (or via a scheduling mechanism) for continuous monitoring and automated cleanup.
-#>
 param (
-    [Parameter(Mandatory=$true)]
-    [string]$BotVolume,
-
-    [ValidateRange(5, [int]::MaxValue)]
-    [Parameter(Mandatory=$true)]
-    [int]$IntervalTime,
-
-    [Parameter(Mandatory = $true)]
-    [string]$HubUri,
-
-    [Parameter(Mandatory = $false)]
-    [int]$ListenerPort,
-
-    [ValidateRange(1, [int]::MaxValue)]
-    [Parameter(Mandatory=$true)]
-    [int]$NumberOfFilesToRetain,
-
-    [Parameter(Mandatory = $false)]
-    [switch]$Docker
+    [CmdletBinding()]
+    [Parameter(Mandatory = $false)] [string] $BotId,
+    [Parameter(Mandatory = $true)]  [string] $BotVolume,
+    [Parameter(Mandatory = $false)] [string] $CallbackIngress,
+    [Parameter(Mandatory = $false)] [string] $CallbackUri,
+    [Parameter(Mandatory = $true)]  [string] $HubUri,
+    [Parameter(Mandatory = $true)]  [int]    $IntervalTime,
+    [Parameter(Mandatory = $true)]  [int]    $NumberOfFilesToRetain,
+    [Parameter(Mandatory = $false)] [string] $Token,
+    [Parameter(Mandatory = $false)] [switch] $Docker
 )
 
-# Change the current directory to the scriptï¿½s folder, ensuring relative paths resolve correctly
+# Change to the script's own directory so any relative paths resolve correctly
 Set-Location -Path $PSScriptRoot
 
-# Import the BotMonitor module from the ï¿½modulesï¿½ subfolder of the script root
-# Using [System.IO.Path]::Combine ensures cross-platform path correctness
-Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotMonitor.psm1')) -Force
+# Import the setup and common modules for bot initialization and utilities
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotSetup.psm1'))  -Force
+Import-Module ([System.IO.Path]::Combine($PSScriptRoot, 'modules', 'BotLogger.psm1')) -Force
 
-# Configure all cmdlets to automatically show Information-stream messages by default
-# This makes Write-Information calls visible without needing -InformationAction on each call
-$PSDefaultParameterValues['*:InformationAction'] = 'Continue'
+# Return to the script directory (in case module import changed location)
+Set-Location -Path $PSScriptRoot
 
-# Find and assign a free TCP port on the Docker host for publishing
-if(-not $ListenerPort) {
-    $ListenerPort = Get-FreePort
-}
+# Build the bot's configuration object (endpoints, metadata, timeouts)
+$botConfiguration = New-BotConfiguration `
+    -BotId               $BotId `
+    -BotName             'volume-cleanup-bot' `
+    -BotType             'cleanup-bot' `
+    -BotVolume           $BotVolume `
+    -CallbackIngress     $CallbackIngress `
+    -CallbackUri         $CallbackUri `
+    -DriverBinaries      $DriverBinaries `
+    -EnvironmentFilePath (Join-Path $PSScriptRoot ".env") `
+    -HubUri              $HubUri `
+    -Token               $Token
 
-# Defines the type of bot instance for logging, metrics, and routing logic
-$botType = "partition-cleanup"
-
-function Import-EnvironmentVariablesFile {
-    <#
-    .SYNOPSIS
-        Imports environment variables from an environment file and additional parameters into the current session.
-
-    .DESCRIPTION
-        This function reads an environment file (each line formatted as KEY=value) and splits each line on the first "=".
-        In addition, it accepts an array of additional environment variable strings (AdditionalEnvironmentVariables) in key=value format.
-        Both sets of key-value pairs are imported into the current session's environment.
-        Any keys specified in SkipNames are skipped.
-
-    .PARAMETER EnvironmentFilePath
-        The full path to the environment file. Defaults to ".env" in the script's directory.
-
-    .PARAMETER SkipNames
-        An array of environment variable names that should not be imported from the file or the additional parameters.
-
-    .PARAMETER AdditionalEnvironmentVariables
-        An array of additional environment variable strings in key=value format.
-        
-    .EXAMPLE
-        Import-EnvironmentVariablesFile -EnvironmentFilePath ".\config\environment.env" -SkipNames "PATH","JAVA_HOME" `
-            -AdditionalEnvironmentVariables @("MY_VAR=Value1", "OTHER_VAR=Value2")
-    #>
-    [CmdletBinding()]
-    param(
-        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
-        [string[]]$SkipNames                      = @(),
-        [string[]]$AdditionalEnvironmentVariables = @()
-    )
-
-    Write-Verbose "Check if the environment file exists; if not, display a message and exit"
-    if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Warning "The environment file was not found at path: $($EnvironmentFilePath)"
-        return
-    }
-
-    Write-Verbose "Read the environment file line by line"
-    $parametersCollection = (Get-Content $EnvironmentFilePath -Force -Encoding UTF8) + $AdditionalEnvironmentVariables
-    $parametersCollection | ForEach-Object {
-        Write-Verbose "Skip lines that are comments (starting with '#') or empty after trimming whitespace"
-        if ($_.Trim().StartsWith("#") -or [string]::IsNullOrWhiteSpace($_)) {
-            return
-        }
-
-        Write-Verbose "Split the line into two parts at the first '=' occurrence"
-        $parts = $_.Split('=', 2)
-        
-        Write-Verbose "If the line does not contain exactly two parts, skip it"
-        if ($parts.Length -ne 2) {
-            return
-        }
-        
-        Write-Verbose "Trim any leading or trailing whitespace from the key and value"
-        $key   = $parts[0].Trim()
-        $value = $parts[1].Trim()
-
-        # Skip this key if it is in the skip list.
-        if ($SkipNames -contains $key) {
-            Write-Verbose "Skipping environment variable '$($key)' as it is in the skip list"
-            return
-        }
-        
-        Set-Item -Path "Env:$($key)" -Value $value
-        Write-Verbose "Set environment variable '$($key)' with value '$($value)'"
-    }
-}
-
-function Wait-Interval {
-    <#
-    .SYNOPSIS
-        Pauses script execution for a specified interval after displaying the next scheduled invocation time.
-
-    .DESCRIPTION
-        This function calculates the next automation invocation time by adding the provided interval (in seconds)
-        to the current time. It then formats and displays this time in ISO 8601 format along with a custom message,
-        and finally pauses execution for the full interval.
-
-    .PARAMETER Message
-        A custom message to display along with the next scheduled invocation time.
-
-    .PARAMETER IntervalTime
-        The time interval (in seconds) to wait before the next automation invocation.
-
-    .EXAMPLE
-        Wait-Interval -Message "Next automation run scheduled at:" -IntervalTime 120
-    #>
-    [CmdletBinding()]
-    param(
-        [int]   $IntervalTime,
-        [string]$Message
-    )
-
-    # Calculate the next scheduled time by adding the specified interval to the current date and time.
-    $nextAutomationTime = (Get-Date).AddSeconds($IntervalTime)
-
-    # Format the calculated time in ISO 8601 format.
-    $isoNextAutomation = $nextAutomationTime.ToString("o")
-
-    # Display the custom message along with the formatted next invocation time.
-    Write-Host "$($Message) $($isoNextAutomation)"
-    Write-Host "$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script."
-
-    # Pause execution for the specified interval.
-    Start-Sleep -Seconds $IntervalTime
-}
-
+# Only proceed if Docker support is enabled
 if ($Docker) {
-    $botName = "g4-partition-cleanup-bot"
     try {
-        Write-Verbose "Docker switch is enabled. Preparing to launch Docker container for bot '$($botName)'."
-        Write-Verbose "Building the Docker command from the specified parameters."
+        Write-Log -Level Verbose -UseColor -Message "Docker switch is enabled. Preparing to launch Docker container for bot '$($botConfiguration.Metadata.BotName)'."
+        Write-Log -Level Verbose -UseColor -Message "Building the Docker command from the specified parameters."
+
+        # Initialize an array of docker run arguments
         $cmdLines = @(
-            "run -d -v `"$($BotVolume):/bots`"",
-            " -e CLEANUP_BOT_NUNBER_OF_FILES=$($NumberOfFilesToRetain)",
-            " -e CLEANUP_BOT_INTERVAL_TIME=$($IntervalTime)",
-            " -e HUB_URI=`"$($HubUri)`"",
-            " -e LISTENER_PORT=$($ListenerPort)",
-            " -p $($ListenerPort):$($ListenerPort) --name `"$($botName)-$([guid]::NewGuid())`" g4-partition-cleanup-bot:latest"
+            "run -d -v `"$($botConfiguration.Directories.BotVolume):/bots`""
+            " -e BOT_ID=`"$($botConfiguration.Metadata.BotId)`""
+            " -e CALLBACK_INGRESS=`"$($botConfiguration.Endpoints.BotCallbackIngress)`""
+            " -e CALLBACK_URI=`"$($botConfiguration.Endpoints.BotCallbackUri)`""
+            " -e CLEANUP_BOT_INTERVAL_TIME=`"$($IntervalTime)`""
+            " -e CLEANUP_BOT_NUNBER_OF_FILES=$($NumberOfFilesToRetain)"
+            " -e HUB_URI=`"$($botConfiguration.Endpoints.HubUri)`""
+            " -e TOKEN=`"$($botConfiguration.Metadata.Token)`""
         )
         
-        Write-Verbose "Joining command parts into a single Docker command string."
+        # Publish port and assign unique container name
+        $cmdLines += " -p $($botConfiguration.Endpoints.CallbackPort):$($botConfiguration.Endpoints.CallbackPort)"
+
+        # Set container name and tag
+        $cmdLines += " --name `"$($botConfiguration.Metadata.BotName)-$([guid]::NewGuid())`" g4-partition-cleanup-bot:latest"
+
+        # Combine the array of arguments into one continuous string
+        Write-Log -Level Verbose -UseColor -Message "Joining command parts into a single Docker command string."
         $dockerCmd = $cmdLines -join [string]::Empty
 
-        Write-Host "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
+        # Wait up to 60 seconds for the container to start
+        Write-Log -Level Verbose -UseColor -Message "Invoking Docker with the following command:$([System.Environment]::NewLine)docker $($dockerCmd)"
         $process = Start-Process -FilePath "docker" -ArgumentList $dockerCmd -PassThru
         $process.WaitForExit(60000)
-
-        Write-Host "Docker container '$($botName)' started successfully."
+    }
+    catch {
+        # Report error details on failure
+        Write-Log -Level Critical -UseColor -Message "Failed to start Docker container '$('volume-cleanup-bot')': $($_.Exception.GetBaseException())"
+    }
+    finally{
         Exit 0
     }
-    catch {
-        Write-Error "Failed to start Docker container '$($botName)': $($_.Exception.GetBaseException())"
-        Exit 1
+}
+
+# Configure PowerShell to display informational messages (Write-Information) in the output stream
+$InformationPreference = 'Continue'
+
+# Build the bot configuration object with endpoints, metadata, and timeouts
+$bot                = Initialize-BotByConfiguration -BotConfiguration $botConfiguration
+$botAutomationFile  = $botConfiguration.Directories.BotAutomationFile
+$botBase64Content   = $botConfiguration.Metadata.BotBase64Content
+$botCallbackJob     = $bot.CallbackJob
+$botOutputDirectory = $botConfiguration.Directories.BotOutputDirectory
+$botCalculatedName  = $botConfiguration.Metadata.BotName
+$botEntryPoint      = $botConfiguration.Endpoints.BotEntryPointPrefix
+$errorsDirectory    = $botConfiguration.Directories.BotErrorsDirectory
+$instance           = $botConfiguration.Metadata.BotId
+$outputDirectory    = $botConfiguration.Directories.BotOutputDirectory
+$saveErrors         = $botConfiguration.Settings.SaveErrors
+$saveResponse       = $botConfiguration.Settings.SaveResponse
+
+# Definitions: grab the ScriptBlock for each function so they can be injected into a child runspace
+$sendBotAutomationRequest = (Get-Command -Name 'Send-BotAutomationRequest').ScriptBlock
+$testBotFile              = (Get-Command -Name 'Test-BotFile').ScriptBlock
+$updateBotStatus          = (Get-Command -Name 'Update-BotStatus').ScriptBlock
+$waitInterval             = (Get-Command -Name 'Wait-Interval').ScriptBlock
+
+# Build an InitialSessionState and import modules into it
+$iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+
+# Create & open the runspace with that ISS
+$runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
+$runspace.Open()
+
+# Create a new in-process runspace for monitoring and registration logic
+$powerShell = [PowerShell]::Create()
+$powerShell.Runspace = $runspace
+
+# Create empty PSDataCollections for input/output (required by PS5 BeginInvoke signature)
+$inputBuffer  = [System.Management.Automation.PSDataCollection[PSObject]]::new()
+$outputBuffer = [System.Management.Automation.PSDataCollection[PSObject]]::new()
+
+# Relay warnings from the runspace
+$powerShell.Streams.Warning.add_DataAdded({
+        param($s, $e)
+
+        $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+        $message   = "$($s[$e.Index].Message)"
+        $message   = if($message.Contains(" - WRN:")) { $message } else { "$($timestamp) - WRN: (Start-CleanupBot) $($s[$e.Index].Message)" }
+        
+        [Console]::ForegroundColor = [ConsoleColor]::Yellow
+        [Console]::WriteLine($message)
+        [Console]::ResetColor()
+    })
+
+# Only wire up informational relaying if the session is configured to show Information streams
+if ($InformationPreference -eq 'Continue') {
+        # Relay informational messages from the runspace
+        $powerShell.Streams.Information.add_DataAdded({
+            param($s, $e)
+
+            $timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+            $message   = "$($s[$e.Index].MessageData)"
+            $message   = if($message.Contains(" - INF:")) { $message } else { "$($timestamp) - INF: (Start-CleanupBot) $($s[$e.Index].MessageData)" }
+
+            [Console]::WriteLine($message)
+        })
     }
-}
 
-try {
-    Write-Verbose "Setting Environment Parameters"
-    Import-EnvironmentVariablesFile
-}
-catch {
-    Write-Error "Failed to set environment parameters: $($_.Exception.GetBaseException().Message)"
-}
+# Add the script to the runspace, passing in all helper scriptblocks and parameters
+$powerShell.AddScript({
+    param(
+        $BotCallbackJob,
+        $BotId,
+        $BotVolume,
+        $HubUri,
+        $IntervalTime,
+        $NumberOfFilesToRetain,
+        $UpdateBotStatus,
+        $WaitInterval
+    )
 
-# Build the complete path to the bot's information directories
-$botId = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+    # Enable debug, information, and verbose output for troubleshooting
+    $DebugPreference       = 'Continue'
+    $InformationPreference = 'Continue'
+    $VerbosePreference     = 'Continue'
 
-# Initialize the bot job with its ID, name, type, container and host ports, and hub URI.
-# This job sets up the bot’s execution context and prepares it to start processing.
-$botJob = Initialize-Bot `
-    -BotId         $botId `
-    -BotName       'cleanup-bot' `
-    -BotType       $botType `
-    -ContainerPort $ListenerPort `
-    -HubUri        $HubUri `
-    -HostPort      $ListenerPort
-    
-# Start the bot watchdog process to monitor the bot's status and health.
-# The watchdog will run in the background and will be responsible for restarting the bot if it stops unexpectedly.
-Start-WatchDog `
-    -BotId         $botId `
-    -BotName       'cleanup-bot' `
-    -BotType       $botType `
-    -ContainerPort $ListenerPort `
-    -HubUri        $HubUri `
-    -HostPort      $ListenerPort
+    # Loop until the callback listener runspace completes
+    while((-not $BotCallbackJob.AsyncResult.IsCompleted -and $BotCallbackJob.Runner.InvocationStateInfo.State -eq 'Running')) {
+        try {
+            # Update the bot status to 'Working' in the hub
+            & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Working" | Out-Null
 
-Write-Host
-Write-Host "Starting main bot loop.$([System.Environment]::NewLine)Press [Ctrl] + [C] to stop the script.$([System.Environment]::NewLine)"
-Write-Verbose "Starting cleanup process on BotVolume: $($BotVolume)"
-Write-Verbose "Will retain the newest $($NumberOfFilesToRetain) files per target folder."
-
-while ($botJob.State -eq 'Running') {
-    # Process target directories (archive, output, errors)
-    try {
-        # Update the bot status to 'Working'
-        Update-BotStatus -BotId $botId -HubUri $HubUri  -Status "Working"
-
-        Write-Verbose "Verifying the existence of the BotVolume at path '$($BotVolume)'"
-        if (-not (Test-Path -Path $BotVolume)) {
-            Clear-Host
-            Write-Host "The specified BotVolume '$($BotVolume)' does not exist. Please verify the provided path." -ForegroundColor Red
-            Wait-Interval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
-            continue
-        }
-
-        Write-Verbose "Scanning for archive, output, and errors directories..."
-        $targetDirs = Get-ChildItem -Path $BotVolume -Directory -Recurse | Where-Object { $_.Name -in @("archive", "output", "errors") }
-        $totalDirs  = $targetDirs.Count
-
-        if ($totalDirs -eq 0) {
-            Clear-Host
-            Wait-Interval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
-            continue
-        }
-
-        $dirCounter = 0
-        foreach ($dir in $targetDirs) {
-            $dirCounter++
-            $dirsPercentComplete = ($dirCounter / $totalDirs) * 100
-            Write-Progress `
-                -Activity        "Processing Directories" `
-                -Status          "Processing Directory $($dir.FullName)" `
-                -PercentComplete $dirsPercentComplete `
-                -Id              1
-
-            # Get files to be removed
-            $targetFiles        = Get-ChildItem -Path $dir.FullName -File | Sort-Object LastWriteTime -Descending
-            $totalFiles         = $targetFiles.Count
-
-            if ($totalFiles -le $NumberOfFilesToRetain) {
-                Write-Verbose "Nothing to remove in: $($dir.FullName)"
+            # Verify the BotVolume directory exists before processing
+            if (-not (Test-Path -Path $BotVolume)) {
+                Write-Warning "The specified BotVolume '$($BotVolume)' does not exist. Please verify the provided path."
+                & $WaitInterval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
                 continue
             }
 
-            $filesToRemove      = $targetFiles[$NumberOfFilesToRetain..($totalFiles - 1)]
-            $totalFilesToRemove = $filesToRemove.Count
+            # Retrieve target directories recursively (archive, output, errors, extractions)
+            $targetDirs = Get-ChildItem -Path $BotVolume -Directory -Recurse | Where-Object { $_.Name -in @("archive", "output", "errors", "extractions") }
+            $totalDirs  = $targetDirs.Count
 
-            if ($totalFilesToRemove -eq 0) {
-                Write-Verbose "Nothing to remove in: $($dir.FullName)"
+            # If no matching directories found, wait for the next interval
+            if ($totalDirs -eq 0) {
+                & $WaitInterval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
                 continue
             }
 
-            $fileCounter = 0
-            foreach ($file in $filesToRemove) {
-                $fileCounter++
-                $filesPercentComplete = ($fileCounter / $totalFilesToRemove) * 100
-                Write-Progress `
-                    -Activity        "Processing Files" `
-                    -Status          "Removing File: $($file.FullName)" `
-                    -PercentComplete $filesPercentComplete `
-                    -Id 100 `
-                    -ParentId 1
-
-                try {
-                    Remove-Item -Path $file.FullName -Force
+            # Iterate through each matching directory
+            foreach ($dir in $targetDirs) {
+                # Ensure directory still exists before proceeding
+                if (-not (Test-Path -Path $dir.FullName)) {
+                    continue
                 }
-                catch {
-                    Write-Verbose "Error removing file '$($file.FullName)': $($_.Exception.GetBaseException().Message)"
+
+                # Get all files sorted by LastWriteTime descending
+                $targetFiles = Get-ChildItem -Path $dir.FullName -File | Sort-Object LastWriteTime -Descending
+                $totalFiles  = $targetFiles.Count
+
+                # Skip directories that don't exceed the file retention threshold
+                if ($totalFiles -le $NumberOfFilesToRetain) {
+                    Write-Debug "Nothing to remove in: $($dir.FullName)"
+                    continue
                 }
-            }
-        }        
-    }
-    catch {
-        Write-Verbose "Error during directories processing: $($_.Exception.GetBaseException().Message)"
-    }
-    finally {
-        Write-Progress -Activity "Processing Files"       -Completed -Id 100 -ParentId 1
-        Write-Progress -Activity "Processing Directories" -Completed -Id 1
-    }
 
-    # Process temporary directories (.tmp)
-    try {
-        Write-Verbose "Scanning for .tmp directories..."
-        $tmpDirs      = Get-ChildItem -Path $BotVolume -Directory -Recurse | Where-Object { $_.Name -eq ".tmp" }
-        $totalTmpDirs = $tmpDirs.Count
+                # Select files to remove beyond the retention threshold
+                $filesToRemove      = $targetFiles[$NumberOfFilesToRetain..($totalFiles - 1)]
+                $totalFilesToRemove = $filesToRemove.Count
 
-        if ($totalTmpDirs -eq 0) {
-            Clear-Host
-            Wait-Interval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
-            continue
+                # If no files are marked for removal, skip
+                if ($totalFilesToRemove -eq 0) {
+                    Write-Debug "Nothing to remove in: $($dir.FullName)"
+                    continue
+                }
+
+                # Remove each file with progress tracking
+                foreach ($file in $filesToRemove) {
+                    try {
+                        # Remove file with force
+                        Remove-Item -Path $file.FullName -Force
+                    }
+                    catch {
+                        # Log error if file deletion fails
+                        Write-Warning "Error removing file '$($file.FullName)': $($_.Exception.GetBaseException().Message)"
+                    }
+                }
+            }        
+        }
+        catch {
+            # Log any error that occurs during directory processing
+            Write-Warning "Error during directories processing: $($_.Exception.GetBaseException().Message)"
         }
 
-        $tmpDirCounter = 0
-        foreach ($tmpDir in $tmpDirs) {
-            $tmpDirCounter++
-            $tmpDirsPercentComplete = ($tmpDirCounter / $totalTmpDirs) * 100
-            Write-Progress `
-                -Activity        "Processing Temporary Directories" `
-                -Status          "Processing Temporary Directory $($tmpDir.FullName)" `
-                -PercentComplete $tmpDirsPercentComplete `
-                -Id              2
+        try {
+            # Find all .tmp directories recursively under BotVolume
+            $tmpDirs      = Get-ChildItem -Path $BotVolume -Directory -Recurse | Where-Object { $_.Name -eq ".tmp" }
+            $totalTmpDirs = $tmpDirs.Count
 
-            $targetFiles = Get-ChildItem -Path $tmpDir.FullName -File | Sort-Object LastWriteTime -Descending
-            $totalFiles  = $targetFiles.Count
-
-            if ($totalFiles -eq 0) {
-                Write-Verbose "Nothing to remove in: $($tmpDir.FullName)"
+            # Skip if no .tmp directories found
+            if ($totalTmpDirs -eq 0) {
+                & $WaitInterval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
                 continue
             }
 
-            $fileCounter = 0
-            foreach ($file in $targetFiles) {
-                $fileCounter++
-                $filesPercentComplete = ($fileCounter / $totalFiles) * 100
-                Write-Progress `
-                    -Activity        "Processing Temporary Files" `
-                    -Status          "Removing Temporary File: $($file.FullName)" `
-                    -PercentComplete $filesPercentComplete `
-                    -Id              200 `
-                    -ParentId        2
+            # Process each .tmp directory individually
+            foreach ($tmpDir in $tmpDirs) {
+                # Get files in the .tmp directory sorted by LastWriteTime descending
+                $targetFiles = Get-ChildItem -Path $tmpDir.FullName -File | Sort-Object LastWriteTime -Descending
+                $totalFiles  = $targetFiles.Count
 
-                try {
-                    Remove-Item -Path $file.FullName -Force
+                # Skip empty directories
+                if ($totalFiles -eq 0) {
+                    Write-Debug "Nothing to remove in: $($tmpDir.FullName)"
+                    continue
                 }
-                catch {
-                    Write-Verbose "Error removing file '$($file.FullName)': $($_.Exception.GetBaseException().Message)"
+
+                # Remove each file in the temporary directory
+                foreach ($file in $targetFiles) {
+                    try {
+                        # Attempt to remove the temporary file
+                        Remove-Item -Path $file.FullName -Force
+                    }
+                    catch {
+                        # Log if file removal fails
+                        Write-Warning "Error removing file '$($file.FullName)': $($_.Exception.GetBaseException().Message)"
+                    }
                 }
             }
         }
-    }
-    catch {
-        Write-Verbose "Error during temporary directories processing: $($_.Exception.GetBaseException().Message)"
-    }
-    finally {
-        Write-Progress -Activity "Processing Temporary Files" -Completed -Id 200 -ParentId 2
-        Write-Progress -Activity "Processing Temporary Directories" -Completed -Id 2
-    }
+        catch {
+            # Log any error that occurs during temporary directory processing
+            Write-Warning "Error during temporary directories processing: $($_.Exception.GetBaseException().Message)"
+        }
 
-    Clear-Host
-    Wait-Interval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
+        try {
+            # Update the bot status to 'Ready' in the hub
+            & $UpdateBotStatus -BotId $BotId -HubUri $HubUri -Status "Ready" | Out-Null
+
+            # Wait before the next scheduled run
+            & $WaitInterval -IntervalTime $IntervalTime -Message "Next bot invocation scheduled at"
+        }
+        catch {
+            # Log any error that occurs during teardown
+            Write-Warning $_.Exception.Message
+        }
+    }
+}) | Out-Null
+
+# Initialize the bot HTTP listener
+$listener = New-Object System.Net.HttpListener
+
+# Add arguments matching the runspace script's param() order
+$powerShell.AddArgument($botCallbackJob)        | Out-Null
+$powerShell.AddArgument($instance)              | Out-Null
+$powerShell.AddArgument($BotVolume)             | Out-Null
+$powerShell.AddArgument($HubUri)                | Out-Null
+$powerShell.AddArgument($IntervalTime)          | Out-Null
+$powerShell.AddArgument($NumberOfFilesToRetain) | Out-Null
+$powerShell.AddArgument($updateBotStatus)       | Out-Null
+$powerShell.AddArgument($waitInterval)          | Out-Null
+
+# Start the runspace asynchronously, capturing the IAsyncResult
+$async = $powerShell.BeginInvoke($inputBuffer, $outputBuffer)
+
+# Display startup message and instructions
+Write-Host "`nStarting cleanup process on volume: $($BotVolume).`nWill retain the newest $($NumberOfFilesToRetain) files per target folder.`n"
+
+# Loop until the callback listener runspace completes
+while ((-not $bot.CallbackJob.AsyncResult.IsCompleted -and $bot.CallbackJob.Runner.InvocationStateInfo.State -eq 'Running') -and (-not $async.IsCompleted -and $powerShell.InvocationStateInfo.State -eq 'Running')) {
+    Start-Sleep -Seconds 3
 }
