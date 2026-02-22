@@ -1,14 +1,4 @@
-# g4-sandboxBelow is a \*\*production-ready GitHub README\*\* tailored to your sandbox builder.
-
-# It does \*\*not break down the script internals\*\*, includes \*\*Quick Start\*\*, and links to official PowerShell installation pages as requested.
-
-# 
-
-# ---
-
-# 
-
-# \# 🚀 G4 Sandbox Builder
+# \# G4™ Sandbox Builder
 
 # 
 
@@ -28,23 +18,23 @@
 
 # 
 
-# \* \[Overview](#-overview)
+# \- \[Overview](#-overview)
 
-# \* \[Features](#-features)
+# \- \[Features](#-features)
 
-# \* \[Requirements](#-requirements)
+# \- \[Requirements](#-requirements)
 
-# \* \[Quick Start](#-quick-start)
+# \- \[Quick Start](#-quick-start)
 
-# \* \[PowerShell Installation (macOS/Linux)](#-powershell-installation-macoslinux)
+# \- \[PowerShell Installation (macOS/Linux)](#-powershell-installation-macoslinux)
 
-# \* \[Usage](#-usage)
+# \- \[Usage](#-usage)
 
-# \* \[Output](#-output)
+# \- \[Output](#-output)
 
-# \* \[Compatibility Notes](#-compatibility-notes)
+# \- \[Compatibility Notes](#-compatibility-notes)
 
-# \* \[License](#-license)
+# \- \[License](#-license)
 
 # 
 
@@ -64,15 +54,15 @@
 
 # 
 
-# \* 🧪 Local development
+# \- 🧪 Local development  
 
-# \* 🤖 CI/CD artifact generation
+# \- 🤖 CI/CD artifact generation  
 
-# \* 📦 Offline / air-gapped deployments
+# \- 📦 Offline / air-gapped deployments  
 
-# \* 🐳 Container volume mounting
+# \- 🐳 Container volume mounting  
 
-# \* 🧱 Deterministic environment builds
+# \- 🧱 Deterministic environment builds  
 
 # 
 
@@ -88,23 +78,23 @@
 
 # 
 
-# \* Fully portable sandbox output
+# \- Fully portable sandbox output  
 
-# \* Deterministic builds
+# \- Deterministic builds  
 
-# \* Cross-platform support
+# \- Cross-platform support  
 
-# \* Automatic dependency retrieval
+# \- Automatic dependency retrieval  
 
-# \* Offline-friendly packaging
+# \- Offline-friendly packaging  
 
-# \* CI/CD ready
+# \- CI/CD ready  
 
-# \* Clean rebuild support
+# \- Clean rebuild support  
 
-# \* Chrome for Testing integration
+# \- Chrome for Testing integration  
 
-# \* G4 tools staging
+# \- G4 tools staging  
 
 # 
 
@@ -120,11 +110,11 @@
 
 # 
 
-# \* PowerShell 5.x \*\*or\*\* PowerShell Core
+# \- PowerShell 5.x \*\*or\*\* PowerShell Core  
 
-# \* Internet access (for initial build)
+# \- Internet access (for initial build)  
 
-# \* Sufficient disk space
+# \- Sufficient disk space  
 
 # 
 
@@ -132,13 +122,13 @@
 
 # 
 
-# \* \*\*PowerShell Core (x64 only)\*\*
+# \- \*\*PowerShell Core (x64 only)\*\*  
 
-# \* `tar` available on PATH
+# \- `tar` available on PATH  
 
-# \* Internet access
+# \- Internet access  
 
-# \* x64 architecture
+# \- x64 architecture  
 
 # 
 
@@ -164,7 +154,7 @@
 
 # cd g4-sandbox
 
-# ```
+# ````
 
 # 
 
@@ -388,5 +378,7 @@
 
 # 
 
-# See repository license for details.
+# This project is licensed under the \*\*MIT License\*\*.
+
+
 
