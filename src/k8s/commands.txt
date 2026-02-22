@@ -1,0 +1,4 @@
+kubectl apply -f ingress-deployment.yaml
+kubectl apply -f selenium-grid-ingress.yaml
+kubectl get pods
+kubectl describe ingress selenium-hub-ingress

@@ -1,0 +1,119 @@
+services:
+  # ---------- PostgreSQL -------------------------------------------
+  db:
+    image: postgres:16
+    container_name: postgres
+    restart: always
+    shm_size: 128mb
+    networks:
+      - app-net
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: sa
+      POSTGRES_DB: postgres
+    ports:
+      - "15432:5432"
+    volumes:
+      - "<local-path>:/var/lib/postgresql/data"
+
+  # ---------- LiteLLM ----------------------------------------------
+  litellm:
+    image: litellm/litellm
+    container_name: litellm-proxy
+    restart: always
+    networks:
+      - app-net
+    depends_on: [db]
+    ports:
+      - "4000:4000"
+    volumes:
+      - "<local-path>/litellm_config.yaml:/app/proxy_config.yaml:ro"
+    command: >
+      --config /app/proxy_config.yaml
+      --port 4000
+
+  # ---------- Open WebUi -------------------------------------------
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    depends_on:
+      - chromadb
+      - pipelines
+    container_name: open-webui
+    restart: always
+    ports:
+      - "3000:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "<local-path>:/app/backend/data"
+    networks:
+      - app-net
+    environment:
+      # Analysis
+      - ENV=dev
+      - GLOBAL_LOG_LEVEL=DEBUG
+      # Configuration
+      - ENABLE_PERSISTENT_CONFIG=true
+      # Database
+      - VECTOR_DB=chroma
+      - CHROMA_HTTP_HOST=chromadb
+      - CHROMA_HTTP_PORT=8000
+      - CHROMA_API_IMPL=chromadb.api.fastapi.FastAPI
+      # OAuth Configuration
+      - ENABLE_OAUTH_SIGNUP=true
+      - MICROSOFT_CLIENT_ID=
+      - MICROSOFT_CLIENT_SECRET=
+      - MICROSOFT_CLIENT_TENANT_ID=
+      - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
+      - OAUTH_SCOPES="openid profile email User.Read"
+      - OAUTH_EMAIL_CLAIM=upn
+      - ENABLE_OAUTH_GROUP_MANAGEMENT=true
+      - ENABLE_OAUTH_GROUP_CREATION=true
+      - OAUTH_GROUP_CLAIM=groups
+      #- CONTENT_EXTRACTION_ENGINE=external
+      #- EXTERNAL_DOCUMENT_LOADER_URL=http://host.docker.internal:9999/api/v4/g4/docs
+      #- EXTERNAL_DOCUMENT_LOADER_API_KEY=0p3n-w3bu!
+
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main
+    container_name: pipelines
+    restart: always
+    ports:
+      - "9099:9099"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "<local-path>:/app/pipelines"
+    networks:
+      - app-net
+    environment:
+      - AGENT_URL=http://host.docker.internal:9955/api/v4/g4/mcp/completions
+      - PIPELINE_CHAT_MODE=bulk
+      - PIPELINES_URLS=https://github.com/g4-api/g4-webui-pipelines/blob/main/pipelines/open_ai_proxy_pipeline.py
+
+  chromadb:
+    image: ghcr.io/chroma-core/chroma:1.1.0
+    container_name: chromadb
+    ports:
+      - "8000:8000"
+    networks:
+      - app-net
+    volumes:
+      - "<local-path>:/chroma/chroma"                # host-path ↔︎ container-path
+    restart: unless-stopped                          # optional – autorestart on failure
+    environment:
+      - IS_PERSISTENT=TRUE                           # tell Chroma to write to disk
+      - PERSIST_DIRECTORY=/chroma/chroma             # (default; shown for clarity)
+      - ANONYMIZED_TELEMETRY=FALSE                   # optional – disable usage stats
+      - CHROMA_SERVER_NOFILE=1048576
+    
+volumes:
+  chromedb:
+  litellm:
+  open-webui:
+  pipelines:
+  postgresql:
+
+networks:
+  app-net:
+    driver: bridge

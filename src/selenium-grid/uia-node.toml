@@ -1,0 +1,10 @@
+[node]
+detect-drivers = false
+
+[relay]
+url = "http://localhost:5555/wd/hub"
+status-endpoint = "/status"
+protocol-version = "HTTP/1.1"
+configs = [
+  "1", "{\"browserName\": \"Uia\", \"platformName\": \"windows\", \"uia:platformVersion\": \"11\"}",
+]
