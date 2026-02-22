@@ -1,22 +1,101 @@
-﻿[CmdletBinding()]
+﻿# ---------------------------------------------------------------------------
+# Script: G4 Sandbox Builder
+#
+# Purpose:
+#   Builds a fully portable G4 sandbox environment by downloading,
+#   assembling, and staging all required runtimes, browsers, drivers,
+#   utilities, and configuration assets.
+#
+# Description:
+#   - Orchestrates the end-to-end sandbox build process
+#   - Downloads platform-specific dependencies (Chrome, .NET, JDK, Node.js, etc.)
+#   - Retrieves required G4 tools and utilities from GitHub releases
+#   - Packages VS Code extensions for offline installation
+#   - Copies local project assets (CLI, Docker, K8s, Grid configs)
+#   - Produces a deterministic, portable output layout suitable for:
+#       * Local execution
+#       * CI/CD artifacts
+#       * Container mounting
+#       * Air-gapped environments
+#
+# Compatibility:
+#   - PowerShell 5.x (Windows)
+#   - PowerShell Core (Windows, Linux, macOS)
+#
+# Assumptions:
+#   - Network access to required upstream endpoints is available
+#   - Helper functions (Get-*, Resolve-*) are loaded in scope
+#   - Output directory is writable
+#   - tar is available on PATH for non-zip extractions when required
+# ---------------------------------------------------------------------------
+[CmdletBinding()]
 param(
+    # Root volume/path where the bot will operate.
+    #
+    # Notes:
+    #   - Typically mounted into containers or used as the runtime working directory
+    #   - Caller is responsible for ensuring sufficient disk space
     [string]$BotVolume,
     
+    # Chrome version to download.
+    #
+    # Notes:
+    #   - Passed through to Chrome artifact resolver
+    #   - Can be full version (e.g., 120.0.6099.71) or major prefix (e.g., 120)
+    #   - When omitted in downstream calls, latest stable may be used
     [string]$ChormeVersion,
     
+    # .NET major version selector.
+    #
+    # Notes:
+    #   - Default is "10"
+    #   - Consumed by Get-Dotnet to resolve the correct runtime channel
     [string]$DotnetVersion = "10",
 
+    # G4 Hub base URI.
+    #
+    # Notes:
+    #   - Used by bots/services to communicate with the hub
+    #   - Should be reachable from the runtime environment
     [string]$HubUri = "http://localhost:9944",
     
+    # Target operating system.
+    #
+    # Notes:
+    #   - Drives platform-specific artifact selection across the pipeline
+    #   - Must match supported ValidateSet values
     [ValidateSet("Linux", "MacOs", "Windows")]
     [string]$OperatingSystem = "Windows",
     
+    # Output directory for the assembled sandbox/package.
+    #
+    # Notes:
+    #   - Relative paths are resolved from the current working directory
+    #   - Will typically contain the final staged G4 bundle
     [string]$OutputDirectory = "E:\G4",
     
+    # When specified, performs a clean rebuild.
+    #
+    # Behavior:
+    #   - Downstream steps may remove existing directories
+    #   - Ensures deterministic build output
     [switch]$Clean
 )
 
+# Enable strict mode for safer scripting.
+#
+# Notes:
+#   - Latest enforces:
+#       * No use of uninitialized variables
+#       * No referencing non-existent properties
+#       * Stricter function semantics
 Set-StrictMode -Version Latest
+
+# Fail fast on all non-terminating errors.
+#
+# Notes:
+#   - Converts many recoverable errors into terminating ones
+#   - Ensures CI/CD pipelines fail deterministically
 $ErrorActionPreference = 'Stop'
 
 # ---------------------------------------------------------------------------
@@ -2445,7 +2524,7 @@ $sandboxSources = @(
     @{
         # Copy the entire docker folder (no wildcard = include folder root)
         Path        = (Join-Path $sourceDirectory "docker")
-        Destination = (Join-Path $stageDirectory "docker")
+        Destination = $stageDirectory
     },
     @{
         # Copy docker-compose files
@@ -2455,7 +2534,7 @@ $sandboxSources = @(
     @{
         # Copy the entire k8s folder
         Path        = (Join-Path $sourceDirectory "k8s")
-        Destination = (Join-Path $stageDirectory "k8s")
+        Destination = $stageDirectory
     },
     @{
         # Copy utilities scripts into utilities/scripts

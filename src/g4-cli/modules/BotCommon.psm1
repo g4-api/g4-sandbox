@@ -65,7 +65,7 @@ $importEnvironment = {
 
     # Ensure the file exists before proceeding
     if (-Not (Test-Path $EnvironmentFilePath)) {
-        Write-Warning "Environment file not found at path: $EnvironmentFilePath"
+        Write-Warning "The environment file was not found at path: $EnvironmentFilePath"
         return
     }
 

@@ -545,37 +545,37 @@ function Show-DockerImageSubmenu {
     # Define Docker image options as an array of ordered hashtables with keys sorted alphabetically.
     $dockerOptions = @(
         [ordered]@{
-            Dockerfile  = "docker/g4-cron-bot.Dockerfile"
+            Dockerfile  = "docker/bots/g4-cron-bot.Dockerfile"
             DefaultTag  = "g4-cron-bot:latest"
             Name        = "Cron Bot"
         },
         [ordered]@{
-            Dockerfile  = "docker/g4-file-listener-bot.Dockerfile"
+            Dockerfile  = "docker/bots/g4-file-listener-bot.Dockerfile"
             DefaultTag  = "g4-file-listener-bot:latest"
             Name        = "File Listener Bot"
         },
         [ordered]@{
-            Dockerfile  = "docker/g4-http-post-listener-bot.Dockerfile"
+            Dockerfile  = "docker/bots/g4-http-post-listener-bot.Dockerfile"
             DefaultTag  = "g4-http-post-listener-bot:latest"
             Name        = "HTTP Post Listener Bot"
         },
         [ordered]@{
-            Dockerfile  = "docker/g4-http-qs-listener-bot.Dockerfile"
+            Dockerfile  = "docker/bots/g4-http-qs-listener-bot.Dockerfile"
             DefaultTag  = "g4-http-qs-listener-bot:latest"
             Name        = "HTTP Query String Listener Bot"
         },
         [ordered]@{
-            Dockerfile  = "docker/g4-http-static-listener-bot.Dockerfile"
+            Dockerfile  = "docker/bots/g4-http-static-listener-bot.Dockerfile"
             DefaultTag  = "g4-http-static-listener-bot:latest"
             Name        = "HTTP Static Listener Bot"
         },
         [ordered]@{
-            Dockerfile  = "docker/g4-static-bot.Dockerfile"
+            Dockerfile  = "docker/bots/g4-static-bot.Dockerfile"
             DefaultTag  = "g4-static-bot:latest"
             Name        = "Static Bot"
         },
         [ordered]@{
-            Dockerfile  = "docker/g4-partition-cleanup-bot.Dockerfile"
+            Dockerfile  = "docker/bots/g4-partition-cleanup-bot.Dockerfile"
             DefaultTag  = "g4-partition-cleanup-bot:latest"
             Name        = "Partition Cleanup Bot"
         }
@@ -658,7 +658,6 @@ function Show-LaunchEnvironmentSubmenu {
         @{ Name = "Start Grid Hub";                     Script = "./Start-SeleniumHub.ps1" },
         @{ Name = "Start UIA Node";                     Script = "./Start-UiaNode.ps1" },
         @{ Name = "Start Chrome Node";                  Script = "./Start-ChromeNode.ps1" },
-        @{ Name = "Start Edge Node";                    Script = "./Start-EdgeNode.ps1" },
         @{ Name = "Start G4 Hub";                       Script = "./Start-G4Hub.ps1" },
         @{ Name = "Start Standalone UIA Driver Server"; Script = "./Start-UiaStandalone.ps1" }
     )
@@ -704,9 +703,6 @@ function Show-LaunchEnvironmentSubmenu {
                 }
                 "Start Chrome Node" {
                     Start-ChromeNodeWizard -Script $selectedOption.Script
-                }
-                "Start Edge Node" {
-                    Start-EdgeNodeWizard -Script $selectedOption.Script
                 }
                 "Start G4 Hub" {
                     Start-G4HubWizard -Script $selectedOption.Script
@@ -824,7 +820,6 @@ function Show-UpdateDriverSubmenu {
     .DESCRIPTION
         This function presents a list of driver update options:
           - Update Chrome Driver
-          - Update Edge Driver
           - Update UIA Driver
         Based on the user's selection, the corresponding update script is executed.
         An option to go back is provided to return to the previous menu.
@@ -837,7 +832,6 @@ function Show-UpdateDriverSubmenu {
     # Each option contains a Name and the corresponding Script to run.
     $updateOptions = @(
         @{ Name = "Update Chrome Driver"; Script = "./Update-ChromeDriver.ps1" },
-        @{ Name = "Update Edge Driver";   Script = "./Update-EdgeDriver.ps1" },
         @{ Name = "Update UIA Driver";    Script = "./Update-UiaDriver.ps1" }
     )
 
@@ -1346,58 +1340,6 @@ function Start-GridHubWizard {
     # and then execute the provided script with the collected parameters.
     Show-Wizard `
         -Title            "Launch Grid Hub" `
-        -WizardParameters $wizardParameters `
-        -ScriptToRun      $Script
-}
-
-function Start-EdgeNodeWizard {
-    <#
-    .SYNOPSIS
-        Launches the wizard interface for starting an Edge Node.
-
-    .DESCRIPTION
-        This function sets up a wizard to collect the necessary configuration for starting an Edge Node.
-        It collects two parameters:
-          - GridHubUri: The drivers endpoint for the Grid. Defaults to "http://localhost:4444/wd/hub".
-          - NodePort: The port for the Edge Node. Defaults to 5553.
-        Both parameters are not mandatory; if no input is provided, their respective default values are used.
-        Once the parameters are collected, the specified script is executed with the provided configuration.
-
-    .PARAMETER Script
-        The path to the script that will be executed after collecting the Edge Node configuration.
-
-    .EXAMPLE
-        Start-EdgeNodeWizard -Script "./Start-EdgeNode.ps1"
-        # Launches the wizard to collect parameters and then runs the Start-EdgeNode.ps1 script.
-    #>
-    param(
-        [string]$Script
-    )
-
-    # Define wizard parameters for starting the Edge Node.
-    $wizardParameters = @(
-        [ordered]@{
-            Default          = "http://localhost:4444/wd/hub"
-            Description      = "Enter the Grid Hub URI (drivers endpoint) for the Edge Node."
-            EnvironmentValue = $env:DRIVER_BINARIES
-            Mandatory        = $true
-            Name             = "GridHubUri"
-            Type             = "String"
-        },
-        [ordered]@{
-            Default          = 5553
-            Description      = "Enter the port for the Edge Node."
-            EnvironmentValue = $env:EDGE_NODE_PORT
-            Mandatory        = $true
-            Name             = "NodePort"
-            Type             = "Number"
-        }
-    )
-
-    # Invoke the wizard interface to collect the Edge Node parameters
-    # and then execute the provided script with the collected configuration.
-    Show-Wizard `
-        -Title            "Launch Edge Node" `
         -WizardParameters $wizardParameters `
         -ScriptToRun      $Script
 }

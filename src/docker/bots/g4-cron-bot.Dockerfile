@@ -30,8 +30,8 @@ WORKDIR /app
 
 # Copy the PowerShell script and .env file into the container
 COPY .env /app/.env
-COPY Start-CronBot.ps1 /app/Start-CronBot.ps1
-COPY modules /app/modules/
+COPY bot-root/Start-CronBot.ps1 /app/Start-CronBot.ps1
+COPY bot-root/modules /app/modules/
 
 # Make the PowerShell script executable (optional good practice)
 RUN chmod +x /app/Start-CronBot.ps1

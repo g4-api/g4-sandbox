@@ -43,8 +43,8 @@ WORKDIR /app
 
 # Copy the PowerShell script and .env file into the container
 COPY .env /app/.env
-COPY Start-StaticBot.ps1 /app/Start-StaticBot.ps1
-COPY modules /app/modules/
+COPY bot-root/Start-StaticBot.ps1 /app/Start-StaticBot.ps1
+COPY bot-root/modules /app/modules/
 
 # Make script executable (optional good practice)
 RUN chmod +x /app/Start-StaticBot.ps1
