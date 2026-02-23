@@ -184,12 +184,12 @@ function Get-ChromeArtifacts {
 
             Write-Host "Clean installation requested. Removing existing destination directory: '$($directory)'" -ForegroundColor DarkGray
 
-            $ProgressPreference='SilentlyContinue'
+            $ProgressPreference = 'SilentlyContinue'
             Remove-Item `
                 -Path    $directory `
                 -Recurse `
                 -Force
-            $ProgressPreference='Continue'
+            $ProgressPreference = 'Continue'
         }
     }
 
@@ -201,8 +201,21 @@ function Get-ChromeArtifacts {
     #
     # Notes:
     #   - Extraction requires the destination to exist
-    if ($ChromeDestinationDirectory) { New-Item -Path $ChromeDestinationDirectory -ItemType Directory -Force | Out-Null }
-    if ($DriverDestinationDirectory) { New-Item -Path $DriverDestinationDirectory -ItemType Directory -Force | Out-Null }
+    if ($ChromeDestinationDirectory) { 
+        New-Item `
+            -Path $ChromeDestinationDirectory `
+            -ItemType Directory `
+            -Force `
+        | Out-Null
+    }
+
+    if ($DriverDestinationDirectory) { 
+        New-Item `
+            -Path $DriverDestinationDirectory `
+            -ItemType Directory `
+            -Force `
+        | Out-Null
+    }
 
     # Define HTTP headers.
     #
@@ -228,9 +241,9 @@ function Get-ChromeArtifacts {
     # Normalize the operating system identifier to match Chrome for Testing platform values.
     $os = [string]::Empty
     switch ($OperatingSystem.ToLower()) {
-        "macos"   { $os = "mac-x64" }
-        "linux"   { $os = "linux64" }
-        default   { $os = "win64" }
+        "macos" { $os = "mac-x64" }
+        "linux" { $os = "linux64" }
+        default { $os = "win64" }
     }
 
     Write-Host "Retrieving Chrome for Testing metadata: $($releasesIndexUrl)" -ForegroundColor DarkGray
@@ -259,9 +272,7 @@ function Get-ChromeArtifacts {
         # Notes:
         #   - Matches by prefix, so "113" will match "113.0.5672.63"
         #   - Current selection uses Select-Object -Last 1
-        $responseJson.versions |
-            Where-Object { [Regex]::IsMatch($_.version, "^$([Regex]::Escape($Version))") } |
-            Select-Object -Last 1
+        $responseJson.versions | Where-Object { [Regex]::IsMatch($_.version, "^$([Regex]::Escape($Version))") } | Select-Object -Last 1
     }
     else {
         $responseJson.channels.Stable
@@ -293,14 +304,14 @@ function Get-ChromeArtifacts {
     #   - The first matching platform entry is selected for each artifact
     $downloads = @(
         @{
-            Name                = "Chrome"
+            Name                 = "Chrome"
             DestinationDirectory = $ChromeDestinationDirectory
-            Url                 = ($metadata.downloads.chrome | Where-Object { $_.platform -eq $os } | Select-Object -First 1).url
+            Url                  = ($metadata.downloads.chrome | Where-Object { $_.platform -eq $os } | Select-Object -First 1).url
         },
         @{
-            Name                = "ChromeDriver"
+            Name                 = "ChromeDriver"
             DestinationDirectory = $DriverDestinationDirectory
-            Url                 = ($metadata.downloads.chromedriver | Where-Object { $_.platform -eq $os } | Select-Object -First 1).url
+            Url                  = ($metadata.downloads.chromedriver | Where-Object { $_.platform -eq $os } | Select-Object -First 1).url
         }
     )
 
@@ -394,9 +405,7 @@ function Get-ChromeArtifacts {
             #     (e.g., "chrome-win64", "chromedriver-win64")
             #   - This step moves all inner contents up one level to place files directly
             #     under the destination directory
-            $topLevelDirectory = Get-ChildItem -Path $download.DestinationDirectory -Directory |
-                Sort-Object Name |
-                Select-Object -First 1
+            $topLevelDirectory = Get-ChildItem -Path $download.DestinationDirectory -Directory | Sort-Object Name | Select-Object -First 1
 
             if (-not $topLevelDirectory) {
                 Write-Warning "No extracted top-level directory was found in '$($download.DestinationDirectory)'"
@@ -409,22 +418,22 @@ function Get-ChromeArtifacts {
             Get-ChildItem -Path $topLevelDirectory.FullName -Force | Move-Item -Destination $download.DestinationDirectory -Force
 
             # Remove the now-empty top-level extracted directory.
-            $ProgressPreference='SilentlyContinue'
+            $ProgressPreference = 'SilentlyContinue'
             Remove-Item -Path $topLevelDirectory.FullName -Force
-            $ProgressPreference='Continue'
+            $ProgressPreference = 'Continue'
             
 
             # Remove LICENSE files to keep the portable payload minimal.
             #
             # Notes:
             #   - Matches LICENSE, LICENSE.txt, LICENSE.chromedriver, etc.
-            $ProgressPreference='SilentlyContinue'
+            $ProgressPreference = 'SilentlyContinue'
             Get-ChildItem `
                 -Path   $download.DestinationDirectory `
                 -Filter "*.chromedriver" `
                 -File `
                 -Recurse | Remove-Item -Force
-            $ProgressPreference='Continue'
+            $ProgressPreference = 'Continue'
 
             Write-Host "$($download.Name) installation completed. Destination directory: '$($download.DestinationDirectory)'" -ForegroundColor Cyan
         }
@@ -490,12 +499,12 @@ function Get-Dotnet {
 
         Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
 
-        $ProgressPreference='SilentlyContinue'
+        $ProgressPreference = 'SilentlyContinue'
         Remove-Item `
             -Path    $DestinationDirectory `
             -Recurse `
             -Force
-        $ProgressPreference='Continue'
+        $ProgressPreference = 'Continue'
     }
 
     # Ensure the archive directory exists.
@@ -543,8 +552,8 @@ function Get-Dotnet {
     # Find the matching release channel entry.
     # The channel provides a releases.json URL which contains the downloadable SDK files.
     $channel = $metadata.'releases-index' |
-        Where-Object { $_.'channel-version' -eq $requestedChannelVersion } |
-        Select-Object -First 1
+    Where-Object { $_.'channel-version' -eq $requestedChannelVersion } |
+    Select-Object -First 1
 
     if (-not $channel) {
         Write-Warning "No matching .NET channel was found for channel version '$($requestedChannelVersion)'."
@@ -566,9 +575,9 @@ function Get-Dotnet {
     #   - Linux uses "linux"
     $os = [string]::Empty
     switch ($OperatingSystem.ToLower()) {
-        "macos"   { $os = "osx" }
-        "linux"   { $os = "linux" }
-        default   { $os = "win" }
+        "macos" { $os = "osx" }
+        "linux" { $os = "linux" }
+        default { $os = "win" }
     }
 
     # Download the channel-specific releases.json metadata.
@@ -602,9 +611,7 @@ function Get-Dotnet {
     # Notes:
     #   - The pattern matches either .zip or .tar.gz
     #   - Expand-Archive supports .zip; .tar.gz requires a different extraction approach
-    $releaseFile = $latestRelease.sdk.files |
-        Where-Object { $_.url -match "$($os)-x64\.(zip|tar\.gz)" } |
-        Select-Object -First 1
+    $releaseFile = $latestRelease.sdk.files | Where-Object { $_.url -match "$($os)-x64\.(zip|tar\.gz)" } | Select-Object -First 1
 
     if (-not $releaseFile -or -not $releaseFile.url) {
         Write-Warning "No matching SDK archive URL was found for operating system '$($OperatingSystem)' (x64)."
@@ -649,6 +656,12 @@ function Get-Dotnet {
 
     $outFileLower = $outFile.ToLowerInvariant()
 
+    New-Item `
+        -Path $DestinationDirectory `
+        -ItemType Directory `
+        -Force `
+    | Out-Null
+
     if ($outFileLower.EndsWith(".zip")) {
 
         # -Force ensures existing files are overwritten if present.
@@ -670,13 +683,6 @@ function Get-Dotnet {
             Write-Warning "Cannot extract tar archive because 'tar' was not found on PATH. Archive: '$($outFile)'"
             return
         }
-
-        # -x: extract, -f: file, -C: destination directory
-        New-Item `
-            -Path $DestinationDirectory `
-            -ItemType Directory `
-            -Force `
-            | Out-Null
         
         & tar -xf $outFile -C $DestinationDirectory
         if ($LASTEXITCODE -ne 0) {
@@ -725,6 +731,9 @@ function Get-G4Artifact {
         # Example: "v1.4.2" or "1.4.2" (depends on your resolver behavior)
         [string]$Tag,
 
+        # Optional pattern to select a specific asset from the release.
+        # If not provided, the first asset in the release is used.
+        # Example: "linux-x64.zip" to select a specific platform artifact
         [string]$AssetPattern,
 
         # Full directory where the downloaded archive will be saved.
@@ -868,12 +877,12 @@ function Get-G4Artifact {
 
         # Select the first asset as the default artifact.
         # This keeps the resolver generic and lightweight.
-        if(-not $AssetPattern -or [string]::IsNullOrEmpty($AssetPattern)) {
-            $asset       = $response.assets[0]
+        if (-not $AssetPattern -or [string]::IsNullOrEmpty($AssetPattern)) {
+            $asset = $response.assets[0]
             $downloadUrl = $asset.browser_download_url
         }
         else {
-            $asset       = $response.assets | Where-Object { [Regex]::IsMatch($_.name, $AssetPattern) } | Select-Object -First 1
+            $asset = $response.assets | Where-Object { [Regex]::IsMatch($_.name, $AssetPattern) } | Select-Object -First 1
             $downloadUrl = $asset.browser_download_url
         }
 
@@ -912,12 +921,12 @@ function Get-G4Artifact {
 
         Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
 
-        $ProgressPreference='SilentlyContinue'
+        $ProgressPreference = 'SilentlyContinue'
         Remove-Item `
             -Path $DestinationDirectory `
             -Recurse `
             -Force
-        $ProgressPreference='Continue'
+        $ProgressPreference = 'Continue'
     }
 
     # Resolve the release metadata (latest or by tag).
@@ -963,12 +972,11 @@ function Get-G4Artifact {
         -OutFile $archiveFilePath `
         -UseBasicParsing
 
-    # Extract the downloaded archive into the destination directory.
+    # Supported archive extensions used to decide between "extract" vs "move".
     #
-    # -Force ensures existing files are overwritten if present.
-
-
-    # Known archive extensions (normalized to lowercase)
+    # Notes:
+    #   - Includes common zip + tar variants and compressed tar formats
+    #   - This is a heuristic based on file name suffix
     $archiveExtensions = @(
         ".zip",
         ".tar",
@@ -982,35 +990,97 @@ function Get-G4Artifact {
         ".bz2",
         ".xz"
     )
-    $fileName = [System.IO.Path]::GetFileName($archiveFilePath).ToLower()
-    $isArchive = $archiveExtensions | Where-Object { $fileName.EndsWith($_) }
-    $fileName = if(-not $DestinationFile) { $fileName } else { $DestinationFile }
 
+    # Resolve the file name from the archive path and normalize it for comparisons.
+    #
+    # Notes:
+    #   - Lower-casing ensures suffix checks are case-insensitive (e.g. .ZIP)
+    $fileName = [System.IO.Path]::GetFileName($archiveFilePath).ToLower()
+
+    # Determine whether the file looks like an archive based on its extension.
+    #
+    # Notes:
+    #   - If any suffix matches, $isArchive will be a non-empty value
+    #   - If no suffix matches, $isArchive will be $null / empty
+    $isArchive = $archiveExtensions | Where-Object { $fileName.EndsWith($_) }
+
+    # Resolve the output file name.
+    #
+    # Behavior:
+    #   - If DestinationFile is provided, it overrides the resolved file name
+    #   - Otherwise, we keep the original file name
+    $fileName = if (-not $DestinationFile) { $fileName } else { $DestinationFile }
+
+    # If the file is not an archive, move it directly to the destination directory.
+    #
+    # Notes:
+    #   - This path is used for binaries or standalone files that should not be extracted
     if (-not $isArchive) {
         Write-Host "File is not an archive. Moving without extraction:" -ForegroundColor Gray
-        Write-Host "  $($ArchiveFilePath) -> $($DestinationDirectory)"  -ForegroundColor Gray
+        Write-Host "  $($archiveFilePath) -> $($DestinationDirectory)" -ForegroundColor Gray
 
+        # Ensure the destination directory exists before moving the file.
         [System.IO.Directory]::CreateDirectory($DestinationDirectory)
 
+        # Move the file into the destination directory and overwrite if it already exists.
         Move-Item `
-            -LiteralPath $ArchiveFilePath `
+            -LiteralPath $archiveFilePath `
             -Destination (Join-Path $DestinationDirectory $fileName) `
             -Force
     }
     else {
-        Write-Host "Extracting archive:'" -ForegroundColor Cyan
+        # Archive path: extract into the destination directory.
+        Write-Host "Extracting archive:" -ForegroundColor Cyan
         Write-Host "  $($archiveFilePath) -> $($DestinationDirectory)" -ForegroundColor Cyan
 
+        # Ensure the destination directory exists for extraction.
         New-Item `
-            -Path $DestinationDirectory `
+            -Path     $DestinationDirectory `
             -ItemType Directory `
             -Force `
-            | Out-Null
+        | Out-Null
 
-        Expand-Archive `
-            -LiteralPath     $ArchiveFilePath `
-            -DestinationPath $DestinationDirectory `
-            -Force
+        # Extract ZIP archives using Expand-Archive.
+        #
+        # Notes:
+        #   - Expand-Archive is built-in on Windows PowerShell and PowerShell Core
+        #   - -Force overwrites existing files when present
+        if ($archiveFilePath.EndsWith(".zip")) {
+            Expand-Archive `
+                -LiteralPath     $archiveFilePath `
+                -DestinationPath $DestinationDirectory `
+                -Force
+        }
+        elseif (
+            $archiveFilePath.EndsWith(".tar.gz") -or
+            $archiveFilePath.EndsWith(".tgz") -or
+            $archiveFilePath.EndsWith(".tar.xz")
+        ) {
+            # Extract tar-based archives using 'tar'.
+            #
+            # Notes:
+            #   - tar is available by default on most Linux/macOS distributions
+            #   - On Windows PowerShell 5, tar may be available on newer Windows builds;
+            #     if not, users should install a tar-capable tool or use the Windows zip variant.
+            $tar = Get-Command tar -ErrorAction SilentlyContinue
+            if (-not $tar) {
+                Write-Warning "Cannot extract tar archive because 'tar' was not found on PATH. Archive: '$($archiveFilePath)'"
+                return
+            }
+
+            # -x: extract, -f: file, -C: destination directory
+            & tar -xf $archiveFilePath -C $DestinationDirectory
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "tar extraction failed for: '$($archiveFilePath)' (exit code: $($LASTEXITCODE))"
+                return
+            }
+        }
+        else {
+            # Archive extension is recognized as "archive-like" by our heuristic,
+            # but we do not support extraction for this particular format yet.
+            Write-Warning "Unsupported archive format for: '$($archiveFilePath)'."
+            return
+        }
     }
 }
 
@@ -1076,12 +1146,12 @@ function Get-NodeJs {
 
         Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
 
-        $ProgressPreference='SilentlyContinue'
+        $ProgressPreference = 'SilentlyContinue'
         Remove-Item `
             -Path    $DestinationDirectory `
             -Recurse `
             -Force
-        $ProgressPreference='Continue'
+        $ProgressPreference = 'Continue'
     }
 
     # Node.js releases metadata endpoint.
@@ -1110,9 +1180,15 @@ function Get-NodeJs {
     #       * Linux:   tar.xz
     $assetSuffix = [string]::Empty
     switch ($OperatingSystem.ToLower()) {
-        "macos"   { $assetSuffix = "darwin-x64.tar.gz" }
-        "linux"   { $assetSuffix = "linux-x64.tar.xz" }
-        default   { $assetSuffix = "win-x64.zip" }
+        "macos" { 
+            $assetSuffix = "darwin-x64.tar.gz"
+        }
+        "linux" {
+            $assetSuffix = "linux-x64.tar.xz"
+        }
+        default {
+            $assetSuffix = "win-x64.zip"
+        }
     }
 
     # Ensure the archive directory exists.
@@ -1124,6 +1200,11 @@ function Get-NodeJs {
     New-Item -Path $DestinationDirectory -ItemType Directory -Force | Out-Null
 
     # Retrieve the Node.js releases index JSON.
+    # Retrieve the Node.js releases index JSON.
+    #
+    # Notes:
+    #   - index.json contains an array of release objects (version, files, LTS flag, etc.)
+    #   - We use it to resolve the requested version or fall back to the latest
     Write-Host "Retrieving Node.js releases index: $($nodejsIndexUrl)" -ForegroundColor DarkGray
 
     $response = Invoke-WebRequest `
@@ -1132,14 +1213,25 @@ function Get-NodeJs {
         -Method         Get `
         -UseBasicParsing
 
+    # Validate the HTTP response.
+    #
+    # Behavior:
+    #   - If the request fails or returns a 4xx/5xx status code, exit early
     if (-not $response -or $response.StatusCode -ge 400) {
         Write-Warning ("Failed to retrieve Node.js releases index metadata from: $($nodejsIndexUrl)")
         return
     }
 
     # Parse the metadata JSON response.
+    #
+    # Notes:
+    #   - ConvertFrom-Json turns the JSON array into PowerShell objects
     $metadata = $response.Content | ConvertFrom-Json
 
+    # Validate parsed metadata.
+    #
+    # Behavior:
+    #   - Exit early if the response is empty or not a valid list of releases
     if (-not $metadata -or ($metadata.Length -eq 0)) {
         Write-Warning "Node.js releases index returned no entries."
         return
@@ -1154,17 +1246,29 @@ function Get-NodeJs {
     #     which is typically the most recent release.
     $requestedVersion = [string]::Empty
     if (-not [string]::IsNullOrWhiteSpace($Version)) {
+
+        # Normalize the input so both "22.11.0" and "v22.11.0" work.
         $requestedVersion = if ($Version.TrimStart().StartsWith("v")) { $Version.Trim() } else { "v$($Version.Trim())" }
     }
 
+    # Initialize the resolved release record.
     $release = $null
 
+    # Attempt exact match lookup when a version was provided.
+    #
+    # Notes:
+    #   - We intentionally use exact version matching against the index entry
+    #   - Select-Object -First 1 ensures deterministic selection if duplicates exist
     if (-not [string]::IsNullOrWhiteSpace($requestedVersion)) {
         $release = $metadata |
-            Where-Object { $_.version -eq $requestedVersion } |
-            Select-Object -First 1
+        Where-Object { $_.version -eq $requestedVersion } |
+        Select-Object -First 1
     }
 
+    # Fall back to latest release when no exact match was resolved.
+    #
+    # Notes:
+    #   - index.json is typically ordered newest -> oldest, so [0] is usually latest
     if (-not $release) {
         if (-not [string]::IsNullOrWhiteSpace($requestedVersion)) {
             Write-Host "Requested Node.js version not found: '$($requestedVersion)'. Falling back to latest release." -ForegroundColor Cyan
@@ -1184,7 +1288,7 @@ function Get-NodeJs {
 
     Write-Host "Resolved Node.js download URL: $($downloadUrl)" -ForegroundColor DarkGray
 
-    # Download the resolved archive into the archive directory.
+    # Resolve the output file name for the downloaded archive.
     #
     # Notes:
     #   - The file name is derived from the URL
@@ -1194,10 +1298,16 @@ function Get-NodeJs {
         $fileName = "download-$([Guid]::NewGuid().ToString('N')).bin"
     }
 
+    # Build the full output path in the archive directory.
     $outFile = Join-Path -Path $ArchiveDirectory -ChildPath $fileName
 
     Write-Host "Downloading Node.js archive to: '$($outFile)'" -ForegroundColor DarkGray
 
+    # Download the resolved Node.js distribution archive.
+    #
+    # Notes:
+    #   - Any network/HTTP failure is handled in catch
+    #   - We use -OutFile to stream directly to disk (no memory buffering)
     try {
         Invoke-WebRequest `
             -Uri      $downloadUrl `
@@ -1250,7 +1360,7 @@ function Get-NodeJs {
             -Path $DestinationDirectory `
             -ItemType Directory `
             -Force `
-            | Out-Null
+        | Out-Null
         
         & tar -xf $outFile -C $DestinationDirectory
         if ($LASTEXITCODE -ne 0) {
@@ -1271,8 +1381,8 @@ function Get-NodeJs {
     #   - This function moves all contents up one level to place Node.js files
     #     directly under the destination directory
     $topLevelDirectory = Get-ChildItem -Path $DestinationDirectory -Directory |
-        Sort-Object Name |
-        Select-Object -First 1
+    Sort-Object Name |
+    Select-Object -First 1
 
     if (-not $topLevelDirectory) {
         Write-Warning "No extracted Node.js directory was found in '$($DestinationDirectory)'"
@@ -1285,9 +1395,9 @@ function Get-NodeJs {
     Get-ChildItem -Path $topLevelDirectory.FullName -Force | Move-Item -Destination $DestinationDirectory -Force
 
     # Remove the now-empty top-level extracted directory.
-    $ProgressPreference='SilentlyContinue'
+    $ProgressPreference = 'SilentlyContinue'
     Remove-Item -Path $topLevelDirectory.FullName -Force
-    $ProgressPreference='Continue'
+    $ProgressPreference = 'Continue'
 
     Write-Host "Node.js installation completed. Destination directory: '$($DestinationDirectory)'" -ForegroundColor Cyan
 }
@@ -1343,12 +1453,12 @@ function Get-OpenJdkBinaries {
 
         Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
 
-        $ProgressPreference='SilentlyContinue'
+        $ProgressPreference = 'SilentlyContinue'
         Remove-Item `
             -Path    $DestinationDirectory `
             -Recurse `
             -Force
-        $ProgressPreference='Continue'
+        $ProgressPreference = 'Continue'
     }
 
     # OpenJDK home page used to discover the latest JDK downloads page.
@@ -1389,7 +1499,7 @@ function Get-OpenJdkBinaries {
     # Example match:
     #   https://jdk.java.net/23
     $latestPagePattern = 'https:\/\/jdk\.java\.net\/\d+'
-    $latestJdkPageUrl  = [regex]::Match([string]$homeHtml.Content, $latestPagePattern).Value
+    $latestJdkPageUrl = [regex]::Match([string]$homeHtml.Content, $latestPagePattern).Value
 
     if ([string]::IsNullOrWhiteSpace($latestJdkPageUrl)) {
         throw "Could not find a latest JDK page link using pattern: '$($latestPagePattern)'"
@@ -1416,7 +1526,7 @@ function Get-OpenJdkBinaries {
     #   - Matches x64 binary assets for the selected OS
     #   - Excludes checksum links (sha files)
     $assetPattern = ('(?<=")https:.*?' + $os + '-x64_bin(?!.*\.sha).*?(?=")')
-    $downloadUrl  = [regex]::Match([string]$latestPageHtml.Content, $assetPattern).Value
+    $downloadUrl = [regex]::Match([string]$latestPageHtml.Content, $assetPattern).Value
 
     if (-not $downloadUrl) {
         throw "No x64_bin links found on '$($latestJdkPageUrl)' using pattern: '$($assetPattern)'"
@@ -1488,7 +1598,7 @@ function Get-OpenJdkBinaries {
             -Path $DestinationDirectory `
             -ItemType Directory `
             -Force `
-            | Out-Null
+        | Out-Null
         
         & tar -xf $outFile -C $DestinationDirectory
         if ($LASTEXITCODE -ne 0) {
@@ -1508,8 +1618,8 @@ function Get-OpenJdkBinaries {
     #   - This function moves all contents up one level to place the JDK files
     #     directly under the destination directory
     $jdkDirectory = Get-ChildItem -Path $DestinationDirectory -Directory |
-        Sort-Object Name |
-        Select-Object -First 1
+    Sort-Object Name |
+    Select-Object -First 1
 
     if (-not $jdkDirectory) {
         Write-Warning "No extracted JDK directory was found in '$($DestinationDirectory)'"
@@ -1522,9 +1632,9 @@ function Get-OpenJdkBinaries {
     Get-ChildItem -Path $jdkDirectory.FullName -Force | Move-Item -Destination $DestinationDirectory -Force
 
     # Remove the now-empty top-level extracted directory.
-    $ProgressPreference='SilentlyContinue'
+    $ProgressPreference = 'SilentlyContinue'
     Remove-Item -Path $jdkDirectory.FullName -Force
-    $ProgressPreference='Continue'
+    $ProgressPreference = 'Continue'
 
     Write-Host "OpenJDK installation completed. Destination directory: '$($DestinationDirectory)'"  -ForegroundColor Cyan
 }
@@ -1616,6 +1726,39 @@ function Get-PowershellCore {
         -DestinationDirectory $DestinationDirectory `
         -DestinationFile      $DestinationFile `
         -GitHubRepository     "https://api.github.com/repos/PowerShell/PowerShell"
+    
+    # Skip permission changes on Windows.
+    #
+    # Notes:
+    #   - Windows does not use POSIX execute permissions
+    #   - chmod is not applicable on Windows hosts
+    if ($OperatingSystem -eq "Windows") {
+        return
+    }
+
+    # Resolve the expected PowerShell binary path.
+    #
+    # Notes:
+    #   - Portable PowerShell extracts the executable as "pwsh" on Linux/macOS
+    #   - This must exist before we attempt to set execute permissions
+    $pwshPath = Join-Path -Path $DestinationDirectory -ChildPath "pwsh"
+
+    # Validate that the PowerShell binary exists.
+    #
+    # Behavior:
+    #   - Warn and exit early if extraction did not produce the expected file
+    if (-not (Test-Path -Path $pwshPath)) {
+        Write-Warning "Expected PowerShell executable not found at: '$($pwshPath)'"
+        return
+    }
+
+    # Ensure the PowerShell binary is executable.
+    #
+    # Notes:
+    #   - Required on Linux/macOS for portable distributions
+    #   - +x adds execute permission for user/group/others
+    Write-Host "Setting execute permissions on PowerShell binary: '$($pwshPath)'" -ForegroundColor DarkGray
+    chmod +x $pwshPath
 }
 
 # ---------------------------------------------------------------------------
@@ -1679,12 +1822,12 @@ function Get-VSCode {
     #   - Only executed when -Clean is specified
     if ($Clean -and (Test-Path -Path $DestinationDirectory)) {
         Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
-        $ProgressPreference='SilentlyContinue'
+        $ProgressPreference = 'SilentlyContinue'
         Remove-Item `
             -Path    $DestinationDirectory `
             -Recurse `
             -Force
-        $ProgressPreference='Continue'
+        $ProgressPreference = 'Continue'
     }
 
     # VS Code stable releases endpoint.
@@ -1710,20 +1853,20 @@ function Get-VSCode {
     #       * Windows: zip
     #       * macOS:   zip
     #       * Linux:   tar.gz
-    $platformId       = [string]::Empty
+    $platformId = [string]::Empty
     $archiveExtention = [string]::Empty
 
     switch ($OperatingSystem.ToLower()) {
         "macos" {
-            $platformId       = "darwin-universal"
+            $platformId = "darwin-universal"
             $archiveExtention = "zip"
         }
         "linux" {
-            $platformId       = "linux-x64"
+            $platformId = "linux-x64"
             $archiveExtention = "tar.gz"
         }
         default {
-            $platformId       = "win32-x64-archive"
+            $platformId = "win32-x64-archive"
             $archiveExtention = "zip"
         }
     }
@@ -1774,7 +1917,7 @@ function Get-VSCode {
 
     # Build a deterministic archive filename.
     $archiveFileName = "vscode-$($resolvedVersion)-$($platformId).$($archiveExtention)"
-    $archivePath     = Join-Path -Path $ArchiveDirectory -ChildPath $archiveFileName
+    $archivePath = Join-Path -Path $ArchiveDirectory -ChildPath $archiveFileName
 
     Write-Host "Downloading VS Code ($($resolvedVersion), $($platformId)) from: $($downloadUrl)" -ForegroundColor DarkGray
     Write-Host "Archive output: $($archivePath)" -ForegroundColor DarkGray
@@ -1811,7 +1954,7 @@ function Get-VSCode {
             -Path $DestinationDirectory `
             -ItemType Directory `
             -Force `
-            | Out-Null
+        | Out-Null
 
         tar -xzf $archivePath -C $DestinationDirectory
         if ($LASTEXITCODE -ne 0) {
@@ -1827,8 +1970,8 @@ function Get-VSCode {
         #   - This function moves all contents up one level to place VS Code files
         #     directly under the destination directory
         $topLevelDirectory = Get-ChildItem -Path $DestinationDirectory -Directory |
-            Sort-Object Name |
-            Select-Object -First 1
+        Sort-Object Name |
+        Select-Object -First 1
 
         if (-not $topLevelDirectory) {
             Write-Warning "No extracted VS Code directory was found in '$($DestinationDirectory)'"
@@ -1841,9 +1984,9 @@ function Get-VSCode {
         Get-ChildItem -Path $topLevelDirectory.FullName -Force | Move-Item -Destination $DestinationDirectory -Force
 
         # Remove the now-empty top-level extracted directory.
-        $ProgressPreference='SilentlyContinue'
+        $ProgressPreference = 'SilentlyContinue'
         Remove-Item -Path $topLevelDirectory.FullName -Force
-        $ProgressPreference='Continue'
+        $ProgressPreference = 'Continue'
     }
 
     Write-Host "VS Code deployed successfully."         -ForegroundColor Cyan
@@ -1938,12 +2081,12 @@ function Get-VSCodeVsix {
 
         Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
 
-        $ProgressPreference='SilentlyContinue'
+        $ProgressPreference = 'SilentlyContinue'
         Remove-Item `
             -Path    $DestinationDirectory `
             -Recurse `
             -Force
-        $ProgressPreference='Continue'
+        $ProgressPreference = 'Continue'
     }
 
     # Ensure destination directory exists.
@@ -1978,9 +2121,9 @@ function Get-VSCodeVsix {
     #   - filterType=7 is the extension name filter; in practice this often works with "publisher.extension"
     #   - flags controls which metadata is returned (versions, files, properties, etc.)
     $body = @{
-        filters = @(
+        filters    = @(
             @{
-                criteria  = @(
+                criteria   = @(
                     @{ filterType = 8; value = "Microsoft.VisualStudio.Code" } # Target product: VS Code
                     @{ filterType = 7; value = $Plugin }                      # Extension identifier
                 )
@@ -2044,37 +2187,37 @@ function Get-VSCodeVsix {
     #   - Casting to [version] enables correct numeric ordering (e.g. 2.10 > 2.9)
     #   - If a version string is not parseable as [version], sorting will throw
     $selectedVersion =
-        if ([string]::IsNullOrWhiteSpace($Version)) {
+    if ([string]::IsNullOrWhiteSpace($Version)) {
 
-            Write-Host "No version provided. Resolving latest available version..." -ForegroundColor DarkGray
+        Write-Host "No version provided. Resolving latest available version..." -ForegroundColor DarkGray
 
-            $latest = $versions `
-                | Sort-Object { [version]$_ } -Descending `
-                | Select-Object -First 1
+        $latest = $versions `
+        | Sort-Object { [version]$_ } -Descending `
+        | Select-Object -First 1
 
-            if ([string]::IsNullOrWhiteSpace($latest)) {
-                throw "Failed to resolve latest version for '$($Plugin)'. Available: $($versionsJson)"
-            }
-
-            Write-Host "Selected latest version: $($latest)" -ForegroundColor Cyan
-            $latest
+        if ([string]::IsNullOrWhiteSpace($latest)) {
+            throw "Failed to resolve latest version for '$($Plugin)'. Available: $($versionsJson)"
         }
-        else {
 
-            Write-Host "Explicit version requested: $($Version)" -ForegroundColor DarkGray
+        Write-Host "Selected latest version: $($latest)" -ForegroundColor Cyan
+        $latest
+    }
+    else {
 
-            if ($versions -notcontains $Version) {
-                throw "Version '$($Version)' not found for '$($Plugin)'. Available: $($versionsJson)"
-            }
+        Write-Host "Explicit version requested: $($Version)" -ForegroundColor DarkGray
 
-            Write-Host "Selected explicit version: $($Version)" -ForegroundColor Cyan
-            $Version
+        if ($versions -notcontains $Version) {
+            throw "Version '$($Version)' not found for '$($Plugin)'. Available: $($versionsJson)"
         }
+
+        Write-Host "Selected explicit version: $($Version)" -ForegroundColor Cyan
+        $Version
+    }
 
     # Locate the selected version object (needed for dependency metadata).
     $selectedVersionObject = $extension.versions `
-        | Where-Object { $_.version -eq $selectedVersion } `
-        | Select-Object -First 1
+    | Where-Object { $_.version -eq $selectedVersion } `
+    | Select-Object -First 1
 
     if (-not $selectedVersionObject) {
         throw "Selected version metadata not found for '$($Plugin)' version '$($selectedVersion)'."
@@ -2083,8 +2226,8 @@ function Get-VSCodeVsix {
     # Marketplace download endpoint (vspackage) is based on:
     #   /_apis/public/gallery/publishers/{publisher}/vsextensions/{extensionName}/{version}/vspackage
     $marketplaceUrl = "https://marketplace.visualstudio.com"
-    $route          = "_apis/public/gallery/publishers/$($publisher)/vsextensions/$($extensionName)/$($selectedVersion)/vspackage"
-    $downloadUrl    = "$($marketplaceUrl)/$($route)"
+    $route = "_apis/public/gallery/publishers/$($publisher)/vsextensions/$($extensionName)/$($selectedVersion)/vspackage"
+    $downloadUrl = "$($marketplaceUrl)/$($route)"
 
     # Output filename includes explicit version for deterministic caching.
     $outFile = Join-Path $DestinationDirectory "$($Plugin).$($selectedVersion).vsix"
@@ -2111,9 +2254,9 @@ function Get-VSCodeVsix {
         }
         catch {
             if (Test-Path $outFile) {
-                $ProgressPreference='SilentlyContinue'
+                $ProgressPreference = 'SilentlyContinue'
                 Remove-Item $outFile -Force -ErrorAction SilentlyContinue
-                $ProgressPreference='Continue'
+                $ProgressPreference = 'Continue'
             }
 
             throw "Failed to download VSIX for '$($Plugin)' version '$($selectedVersion)'. $($_.Exception.Message)"
@@ -2131,12 +2274,12 @@ function Get-VSCodeVsix {
     #   - ExtensionDependencies: hard dependencies required by VS Code
     #   - ExtensionPack: a "meta extension" that lists other extensions to install together
     $dependenciesObject = $selectedVersionObject.properties `
-        | Where-Object { $_.key -eq "Microsoft.VisualStudio.Code.ExtensionDependencies" } `
-        | Select-Object -First 1
+    | Where-Object { $_.key -eq "Microsoft.VisualStudio.Code.ExtensionDependencies" } `
+    | Select-Object -First 1
 
     $extensionPackObject = $selectedVersionObject.properties `
-        | Where-Object { $_.key -eq "Microsoft.VisualStudio.Code.ExtensionPack" } `
-        | Select-Object -First 1
+    | Where-Object { $_.key -eq "Microsoft.VisualStudio.Code.ExtensionPack" } `
+    | Select-Object -First 1
 
     $dependencies = @()
 
@@ -2152,9 +2295,9 @@ function Get-VSCodeVsix {
 
     # Normalize dependency list.
     $dependencies = $dependencies `
-        | ForEach-Object { $_.Trim().ToLowerInvariant() } `
-        | Where-Object { $_ -and ($_ -notin $IgnoredDependencies) } `
-        | Select-Object -Unique
+    | ForEach-Object { $_.Trim().ToLowerInvariant() } `
+    | Where-Object { $_ -and ($_ -notin $IgnoredDependencies) } `
+    | Select-Object -Unique
 
     if (-not $dependencies -or ($dependencies.Length -eq 0)) {
         Write-Host "No new dependencies to process for '$($Plugin)'." -ForegroundColor DarkGray
@@ -2325,7 +2468,7 @@ $sourceDirectory = [System.IO.Path]::Combine($PSScriptRoot)
 #   - "a" acts as the final assembled stage
 #   - "_work" stores temporary archives during download/extraction
 $stageDirectory = Join-Path $baseDirecotry "a"
-$workDirectory  = Join-Path $baseDirecotry "_work"
+$workDirectory = Join-Path $baseDirecotry "_work"
 
 # Structured stage subdirectories.
 #
@@ -2334,9 +2477,9 @@ $workDirectory  = Join-Path $baseDirecotry "_work"
 #   - Drivers: WebDriver binaries
 #   - runtime: dotnet/jdk/nodejs
 #   - utilities: supporting tools (VS Code, trackers, etc.)
-$browsersDirectory  = Join-Path $stageDirectory "browsers"
-$driversDirectory   = Join-Path $stageDirectory "drivers"
-$runtimeDirectory   = Join-Path $stageDirectory "runtime"
+$browsersDirectory = Join-Path $stageDirectory "browsers"
+$driversDirectory = Join-Path $stageDirectory "drivers"
+$runtimeDirectory = Join-Path $stageDirectory "runtime"
 $utilitiesDirectory = Join-Path $stageDirectory "bot-utilities"
 
 # Tool definitions to download from GitHub releases.
@@ -2469,6 +2612,12 @@ Get-VSCode `
     -DestinationDirectory (Join-Path $utilitiesDirectory "vs-code") `
     -Clean
 
+# Download + extract Powershell Core.
+Get-PowershellCore `
+    -OperatingSystem      $OperatingSystem `
+    -ArchiveDirectory     $workDirectory `
+    -DestinationDirectory (Join-Path $utilitiesDirectory "powershell")
+
 # GitHub Release Tools
 foreach ($tool in $tools) {
 
@@ -2490,18 +2639,12 @@ foreach ($tool in $tools) {
         -GitHubRepository     $tool.GitHubRepository
 }
 
-# Download + extract Powershell Core.
-Get-PowershellCore `
-    -OperatingSystem      $OperatingSystem `
-    -ArchiveDirectory     $workDirectory `
-    -DestinationDirectory (Join-Path $utilitiesDirectory "powershell")
-
 # VSIX Extensions (Offline Packaging)
 foreach ($vscodeExtension in $vscodeExtensions) {
 
     # Retry policy for each extension download.
     $maxRetries = 3
-    $success    = $false
+    $success = $false
 
     # Attempt to download the VSIX up to $maxRetries times.
     for ($attempt = 1; $attempt -le $maxRetries -and -not $success; $attempt++) {
@@ -2595,7 +2738,7 @@ foreach ($sandboxSource in $sandboxSources) {
         -ItemType Directory `
         -Path     $sandboxSource.Destination `
         -Force `
-        | Out-Null
+    | Out-Null
 
     # ---------------------------------------------------------------------
     # Perform recursive copy.
@@ -2620,13 +2763,13 @@ foreach ($sandboxSource in $sandboxSources) {
 #   - SilentlyContinue avoids noise if the directory does not exist.
 #   - LiteralPath avoids wildcard interpretation.
 if ($Clean) {
-    $ProgressPreference='SilentlyContinue'
+    $ProgressPreference = 'SilentlyContinue'
     Remove-Item `
         -LiteralPath $sandboxDirectory `
         -Recurse `
         -Force `
         -ErrorAction SilentlyContinue
-    $ProgressPreference='Continue'
+    $ProgressPreference = 'Continue'
 }
 
 # Ensure the sandbox root directory exists.
@@ -2636,7 +2779,7 @@ New-Item -ItemType Directory -Path $sandboxDirectory -Force | Out-Null
 #
 # Notes:
 #   - TrimEnd ensures consistent substring math later.
-$stageRoot = (Resolve-Path $stageDirectory).Path.TrimEnd('\','/')
+$stageRoot = (Resolve-Path $stageDirectory).Path.TrimEnd('\', '/')
 
 # Get all FILES to copy (not directories), so progress can reach 100%.
 #
@@ -2644,9 +2787,9 @@ $stageRoot = (Resolve-Path $stageDirectory).Path.TrimEnd('\','/')
 #   - Using "*" ensures contents of the directory, not the directory itself.
 #   - -File ensures we count/copy only files (no folders).
 #   - -Force includes hidden/system files.
-$items     = Get-ChildItem -Path $stageDirectory -Recurse -Force -File
-$total     = $items.Count
-$index     = 0
+$items = Get-ChildItem -Path $stageDirectory -Recurse -Force -File
+$total = $items.Count
+$index = 0
 $lastIndex = -1
 
 foreach ($item in $items) {
@@ -2662,7 +2805,7 @@ foreach ($item in $items) {
     }
 
     # Build destination path while preserving the stageRoot-relative structure.
-    $relativePath    = $fullPath.Substring($stageRoot.Length).TrimStart('\','/')
+    $relativePath = $fullPath.Substring($stageRoot.Length).TrimStart('\', '/')
     $destinationPath = Join-Path $sandboxDirectory $relativePath
 
     # Ensure destination directory exists.
