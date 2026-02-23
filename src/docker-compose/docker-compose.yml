@@ -1,0 +1,163 @@
+services:
+  g4-hub:
+    image: g4api/g4-hub
+    restart: unless-stopped
+    networks: [ g4 ]
+
+    ports:
+      - "9944:9944"
+
+    environment:
+      - SELENIUM_GRID_URL=http://router:4444
+
+    depends_on:
+      router:
+        condition: service_healthy
+
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:9944/api/v4/g4/ping | grep -q Pong || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  event-bus:
+    image: selenium/event-bus:${SE_VERSION:-latest}
+    restart: unless-stopped
+    networks: [ g4 ]
+    ports:
+      # ZMQ ports (needed if something outside docker must talk to the Grid internals)
+      - "4442:4442" # XPUB (publish)
+      - "4443:4443" # XSUB (subscribe)
+
+      # HTTP status/health endpoint (what your logs show)
+      - "5557:5557"
+
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:5557/status || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  sessions:
+    image: selenium/sessions:${SE_VERSION:-latest}
+    restart: unless-stopped
+    networks: [ g4 ]
+    depends_on:
+      event-bus:
+        condition: service_healthy
+    environment:
+      - SE_EVENT_BUS_HOST=event-bus
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:5556/status || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  session-queue:
+    image: selenium/session-queue:${SE_VERSION:-latest}
+    restart: unless-stopped
+    networks: [ g4 ]
+    depends_on:
+      event-bus:
+        condition: service_healthy
+    environment:
+      - SE_EVENT_BUS_HOST=event-bus
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:5559/status || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  distributor:
+    image: selenium/distributor:${SE_VERSION:-latest}
+    restart: unless-stopped
+    networks: [ g4 ]
+    depends_on:
+      event-bus:
+        condition: service_healthy
+      sessions:
+        condition: service_healthy
+      session-queue:
+        condition: service_healthy
+    environment:
+      - SE_EVENT_BUS_HOST=event-bus
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_SESSIONS_MAP_HOST=sessions
+      - SE_SESSION_QUEUE_HOST=session-queue
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:5553/status || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  router:
+    image: selenium/router:${SE_VERSION:-latest}
+    restart: unless-stopped
+    networks: [ g4 ]
+    depends_on:
+      distributor:
+        condition: service_healthy
+      session-queue:
+        condition: service_healthy
+      sessions:
+        condition: service_healthy
+    ports:
+      - "4444:4444"
+    environment:
+      - SE_DISTRIBUTOR_HOST=distributor
+      - SE_SESSIONS_MAP_HOST=sessions
+      - SE_SESSION_QUEUE_HOST=session-queue
+      - SE_SESSION_REQUEST_TIMEOUT=${GRID_SESSION_REQUEST_TIMEOUT:-300}
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:4444/status | grep -q 'ready' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  chrome:
+    image: selenium/node-chrome:${SE_VERSION:-latest}
+    restart: unless-stopped
+    networks: [ g4 ]
+    depends_on:
+      event-bus:
+        condition: service_healthy
+      router:
+        condition: service_healthy
+    shm_size: 4gb
+    environment:
+      - SE_EVENT_BUS_HOST=event-bus
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+
+      - SE_NODE_MAX_SESSIONS=${NODE_MAX_SESSIONS:-1}
+      - SE_NODE_SESSION_TIMEOUT=${NODE_SESSION_TIMEOUT:-300}
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+
+      # Advertise 5 identical chrome slots
+      - SE_NODE_STEREOTYPE={"browserName":"chrome","platformName":"linux"}
+      - SE_NODE_MAX_INSTANCES=5
+
+      - SE_SCREEN_WIDTH=1920
+      - SE_SCREEN_HEIGHT=1080
+      - SE_VNC_NO_PASSWORD=1
+
+  chrome-video:
+    image: selenium/video:${SE_VERSION:-latest}
+    restart: unless-stopped
+    networks: [ g4 ]
+    depends_on:
+      chrome:
+        condition: service_started
+    environment:
+      - DISPLAY_CONTAINER_NAME=chrome
+      - SE_VIDEO_FILE_NAME=auto
+
+networks:
+  g4:
+    name: g4-app
+    driver: bridge

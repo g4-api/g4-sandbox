@@ -1,0 +1,1 @@
+docker compose -p g4-sandbox up -d --pull always --remove-orphans --force-recreate --scale chrome=${CHROME_NODES:-1}

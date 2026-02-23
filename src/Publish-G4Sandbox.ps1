@@ -65,14 +65,14 @@ param(
     #   - Drives platform-specific artifact selection across the pipeline
     #   - Must match supported ValidateSet values
     [ValidateSet("Linux", "MacOs", "Windows")]
-    [string]$OperatingSystem = "Windows",
+    [string]$OperatingSystem = "Linux",
     
     # Output directory for the assembled sandbox/package.
     #
     # Notes:
     #   - Relative paths are resolved from the current working directory
     #   - Will typically contain the final staged G4 bundle
-    [string]$OutputDirectory = "E:\G4",
+    [string]$OutputDirectory = "/tmp/g4-sandbox",
     
     # When specified, performs a clean rebuild.
     #
@@ -672,6 +672,12 @@ function Get-Dotnet {
         }
 
         # -x: extract, -f: file, -C: destination directory
+        New-Item `
+            -Path $DestinationDirectory `
+            -ItemType Directory `
+            -Force `
+            | Out-Null
+        
         & tar -xf $outFile -C $DestinationDirectory
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "tar extraction failed for: '$($outFile)' (exit code: $($LASTEXITCODE))"
@@ -995,10 +1001,16 @@ function Get-G4Artifact {
         Write-Host "Extracting archive:'" -ForegroundColor Cyan
         Write-Host "  $($archiveFilePath) -> $($DestinationDirectory)" -ForegroundColor Cyan
 
+        New-Item `
+            -Path $DestinationDirectory `
+            -ItemType Directory `
+            -Force `
+            | Out-Null
+
         Expand-Archive `
             -LiteralPath     $ArchiveFilePath `
             -DestinationPath $DestinationDirectory `
-            -Force   
+            -Force
     }
 }
 
@@ -1234,6 +1246,12 @@ function Get-NodeJs {
         }
 
         # -x: extract, -f: file, -C: destination directory
+        New-Item `
+            -Path $DestinationDirectory `
+            -ItemType Directory `
+            -Force `
+            | Out-Null
+        
         & tar -xf $outFile -C $DestinationDirectory
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "tar extraction failed for: '$($outFile)' (exit code: $($LASTEXITCODE))"
@@ -1466,6 +1484,12 @@ function Get-OpenJdkBinaries {
         }
 
         # -x: extract, -f: file, -C: destination directory
+        New-Item `
+            -Path $DestinationDirectory `
+            -ItemType Directory `
+            -Force `
+            | Out-Null
+        
         & tar -xf $outFile -C $DestinationDirectory
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "tar extraction failed for: '$($outFile)' (exit code: $($LASTEXITCODE))"
@@ -1565,19 +1589,13 @@ function Get-PowershellCore {
     #   - Regex pattern is used later by Get-G4Artifact to pick the correct asset
     switch ($OperatingSystem.ToLower()) {
         "macos" {
-            $platformId       = "osx-x64"
-            $archiveExtention = "tar.gz"
-            $assertPattern    = "osx-x64\.tar\.gz$"
+            $assertPattern = "osx-x64\.tar\.gz$"
         }
         "linux" {
-            $platformId       = "linux-x64"
-            $archiveExtention = "tar.gz"
-            $assertPattern    = "linux-x64\.tar\.gz$"
+            $assertPattern = "linux-x64\.tar\.gz$"
         }
         default {
-            $platformId       = "win-x64"
-            $archiveExtention = "zip"
-            $assertPattern    = "win-x64\.zip$"
+            $assertPattern = "win-x64\.zip$"
         }
     }
 
@@ -1653,18 +1671,6 @@ function Get-VSCode {
         # When specified, removes the destination directory before extraction.
         [Switch]$Clean
     )
-
-    $newHttpClient = {
-        $handler                        = New-Object System.Net.Http.HttpClientHandler
-        $handler.AllowAutoRedirect      = $true
-        $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
-
-        $client         = New-Object System.Net.Http.HttpClient($handler)
-        $client.Timeout = [TimeSpan]::FromMinutes(10)
-        $client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-
-        return $client
-    }
 
     # Clean the destination directory if explicitly requested.
     #
@@ -1801,11 +1807,43 @@ function Get-VSCode {
         #   - -x: extract
         #   - -z: gzip
         #   - -f: file
+        New-Item `
+            -Path $DestinationDirectory `
+            -ItemType Directory `
+            -Force `
+            | Out-Null
+
         tar -xzf $archivePath -C $DestinationDirectory
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "tar extraction failed with exit code $($LASTEXITCODE)."
             return
         }
+
+        # Flatten the extracted folder structure.
+        #
+        # Notes:
+        #   - VS Code archives typically extract into a single top-level directory:
+        #       vscode-<version>-<os>-x64
+        #   - This function moves all contents up one level to place VS Code files
+        #     directly under the destination directory
+        $topLevelDirectory = Get-ChildItem -Path $DestinationDirectory -Directory |
+            Sort-Object Name |
+            Select-Object -First 1
+
+        if (-not $topLevelDirectory) {
+            Write-Warning "No extracted VS Code directory was found in '$($DestinationDirectory)'"
+            return
+        }
+
+        Write-Host "Flattening extracted layout by moving contents from '$($topLevelDirectory.FullName)' to '$($DestinationDirectory)'" -ForegroundColor DarkGray
+
+        # Move all extracted contents (files + folders) up one level.
+        Get-ChildItem -Path $topLevelDirectory.FullName -Force | Move-Item -Destination $DestinationDirectory -Force
+
+        # Remove the now-empty top-level extracted directory.
+        $ProgressPreference='SilentlyContinue'
+        Remove-Item -Path $topLevelDirectory.FullName -Force
+        $ProgressPreference='Continue'
     }
 
     Write-Host "VS Code deployed successfully."         -ForegroundColor Cyan
@@ -2294,12 +2332,10 @@ $workDirectory  = Join-Path $baseDirecotry "_work"
 # Notes:
 #   - Browsers: Chrome binaries
 #   - Drivers: WebDriver binaries
-#   - bot-root: CLI + runtime entry
 #   - runtime: dotnet/jdk/nodejs
 #   - utilities: supporting tools (VS Code, trackers, etc.)
 $browsersDirectory  = Join-Path $stageDirectory "browsers"
 $driversDirectory   = Join-Path $stageDirectory "drivers"
-$rootDirectory      = Join-Path $stageDirectory "bot-root"
 $runtimeDirectory   = Join-Path $stageDirectory "runtime"
 $utilitiesDirectory = Join-Path $stageDirectory "bot-utilities"
 
@@ -2456,6 +2492,7 @@ foreach ($tool in $tools) {
 
 # Download + extract Powershell Core.
 Get-PowershellCore `
+    -OperatingSystem      $OperatingSystem `
     -ArchiveDirectory     $workDirectory `
     -DestinationDirectory (Join-Path $utilitiesDirectory "powershell")
 
