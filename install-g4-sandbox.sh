@@ -2,111 +2,97 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/g4-api/g4-sandbox.git"
-WORK_DIR="/tmp/g4-sandbox"
+ROOT_WORK_DIR="/tmp/g4-sandbox-bootstrap"
+REPO_DIR="$ROOT_WORK_DIR/repo"
+SRC_DIR="$REPO_DIR/src"
+TOOLS_DIR="$ROOT_WORK_DIR/tools"
+PS_DIR="$TOOLS_DIR/powershell"
+PS_ARCHIVE="$TOOLS_DIR/powershell.tar.gz"
 OUTPUT_DIR="/opt/g4-sandbox"
+
+SUDO=""
 
 log() {
   printf '\n[+] %s\n' "$1"
 }
 
+cleanup() {
+  rm -rf "$ROOT_WORK_DIR"
+}
+
 require_sudo() {
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     SUDO="sudo"
-  else
-    SUDO=""
   fi
 }
 
 install_base_tools() {
   if command -v apt-get >/dev/null 2>&1; then
     $SUDO apt-get update
-    $SUDO apt-get install -y curl git ca-certificates gnupg
+    $SUDO apt-get install -y curl git tar gzip ca-certificates
   elif command -v dnf >/dev/null 2>&1; then
-    $SUDO dnf install -y curl git ca-certificates gnupg
+    $SUDO dnf install -y curl git tar gzip ca-certificates
   elif command -v yum >/dev/null 2>&1; then
-    $SUDO yum install -y curl git ca-certificates gnupg
+    $SUDO yum install -y curl git tar gzip ca-certificates
   elif command -v zypper >/dev/null 2>&1; then
-    $SUDO zypper --non-interactive install curl git ca-certificates gpg2
+    $SUDO zypper --non-interactive install curl git tar gzip ca-certificates
+  elif command -v apk >/dev/null 2>&1; then
+    $SUDO apk add --no-cache curl git tar gzip ca-certificates
   else
-    echo "Unsupported package manager. Install curl/git manually first."
+    echo "Unsupported package manager. Please install curl, git, tar, gzip manually."
     exit 1
   fi
 }
 
-install_powershell() {
-  if command -v pwsh >/dev/null 2>&1; then
-    log "PowerShell already installed"
-    return
-  fi
-
-  . /etc/os-release
-
-  case "${ID:-}" in
-    ubuntu)
-      log "Installing PowerShell on Ubuntu"
-      curl -fsSL -o /tmp/packages-microsoft-prod.deb "https://packages.microsoft.com/config/ubuntu/${VERSION_ID}/packages-microsoft-prod.deb"
-      $SUDO dpkg -i /tmp/packages-microsoft-prod.deb
-      rm -f /tmp/packages-microsoft-prod.deb
-      $SUDO apt-get update
-      $SUDO apt-get install -y powershell
-      ;;
-    debian)
-      log "Installing PowerShell on Debian"
-      curl -fsSL -o /tmp/packages-microsoft-prod.deb "https://packages.microsoft.com/config/debian/${VERSION_ID}/packages-microsoft-prod.deb"
-      $SUDO dpkg -i /tmp/packages-microsoft-prod.deb
-      rm -f /tmp/packages-microsoft-prod.deb
-      $SUDO apt-get update
-      $SUDO apt-get install -y powershell
-      ;;
-    rhel|rocky|almalinux|ol|fedora)
-      log "Installing PowerShell on RPM-based distro"
-      MAJOR_VERSION="${VERSION_ID%%.*}"
-      curl -fsSL -o /tmp/packages-microsoft-prod.rpm "https://packages.microsoft.com/config/rhel/${MAJOR_VERSION}/packages-microsoft-prod.rpm"
-      $SUDO rpm -i /tmp/packages-microsoft-prod.rpm
-      rm -f /tmp/packages-microsoft-prod.rpm
-
-      if command -v dnf >/dev/null 2>&1; then
-        $SUDO dnf install -y powershell
-      else
-        $SUDO yum install -y powershell
-      fi
-      ;;
-    opensuse*|sles)
-      log "Installing PowerShell on SUSE"
-      $SUDO rpm --import https://packages.microsoft.com/keys/microsoft.asc
-      curl -fsSL https://packages.microsoft.com/config/rhel/8/prod.repo | $SUDO tee /etc/zypp/repos.d/microsoft.repo >/dev/null
-      $SUDO zypper refresh
-      $SUDO zypper --non-interactive install powershell
-      ;;
+get_ps_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo "x64" ;;
+    aarch64|arm64) echo "arm64" ;;
     *)
-      echo "Unsupported distro for automatic PowerShell install: ${ID:-unknown}"
-      echo "Install pwsh manually, then rerun."
+      echo "Unsupported architecture: $(uname -m)"
       exit 1
       ;;
   esac
 }
 
+download_portable_powershell() {
+  local arch
+  arch="$(get_ps_arch)"
+
+  log "Downloading portable PowerShell for linux-$arch"
+  mkdir -p "$PS_DIR" "$TOOLS_DIR"
+
+  curl -fsSL "https://aka.ms/powershell-release?tag=stable&os=linux&arch=$arch" -o "$PS_ARCHIVE"
+  tar -xzf "$PS_ARCHIVE" -C "$PS_DIR"
+  chmod +x "$PS_DIR/pwsh"
+}
+
 clone_repo() {
   log "Cloning g4-sandbox"
-  rm -rf "$WORK_DIR"
-  git clone --depth 1 "$REPO_URL" "$WORK_DIR"
+  mkdir -p "$ROOT_WORK_DIR"
+  git clone --depth 1 "$REPO_URL" "$REPO_DIR"
 }
 
 publish_sandbox() {
   log "Publishing G4 sandbox to $OUTPUT_DIR"
   $SUDO mkdir -p "$OUTPUT_DIR"
 
-  pwsh -NoLogo -NoProfile -File "$WORK_DIR/src/Publish-G4Sandbox.ps1" \
+  cd "$SRC_DIR"
+
+  "$PS_DIR/pwsh" -NoLogo -NoProfile -File "./Publish-G4Sandbox.ps1" \
     -OperatingSystem "Linux" \
     -OutputDirectory "$OUTPUT_DIR"
 }
 
 main() {
+  trap cleanup EXIT
+
   require_sudo
   install_base_tools
-  install_powershell
+  download_portable_powershell
   clone_repo
   publish_sandbox
+
   log "Done"
 }
 
