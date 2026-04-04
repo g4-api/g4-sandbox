@@ -2,21 +2,38 @@
 
 A fully portable sandbox builder for the **G4™ automation ecosystem**.
 
-The script assembles a deterministic, offline-ready runtime bundle that includes required runtimes, browsers, drivers, tools, and configuration assets — suitable for local execution, CI/CD pipelines, containers, and air-gapped environments.
+## 📚 Table of Contents
+
+* [One-line installation](#one-line-installation)
+* [Overview](#-overview)
+* [Features](#-features)
+* [Requirements](#-requirements)
+* [Quick Start](#-quick-start)
+* [PowerShell Installation (macOS/Linux)](#-powershell-installation-macoslinux)
+* [Usage](#usage)
+* [Output](#-output)
+* [Compatibility Notes](#compatibility-notes)
+* [License](#-license)
 
 ---
 
-## 📚 Table of Contents
+### One-line installation
 
-- [Overview](#-overview)
-- [Features](#-features)
-- [Requirements](#-requirements)
-- [Quick Start](#-quick-start)
-- [PowerShell Installation (macOS/Linux)](#-powershell-installation-macoslinux)
-- [Usage](#-usage)
-- [Output](#-output)
-- [Compatibility Notes](#-compatibility-notes)
-- [License](#-license)
+#### Windows
+
+```powershell
+irm https://raw.githubusercontent.com/g4-api/g4-sandbox/main/install-g4-sandbox.ps1 | iex
+````
+
+#### Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g4-api/g4-sandbox/main/install-g4-sandbox.sh | bash
+```
+
+The installer bootstraps a portable PowerShell runtime, pulls the repository, runs the sandbox publish script, and cleans up temporary bootstrap files when complete.
+
+The script assembles a deterministic, offline-ready runtime bundle that includes required runtimes, browsers, drivers, tools, and configuration assets — suitable for local execution, CI/CD pipelines, containers, and air-gapped environments.
 
 ---
 
@@ -26,11 +43,11 @@ The script assembles a deterministic, offline-ready runtime bundle that includes
 
 It is designed for:
 
-- 🧪 Local development  
-- 🤖 CI/CD artifact generation  
-- 📦 Offline / air-gapped deployments  
-- 🐳 Container volume mounting  
-- 🧱 Deterministic environment builds  
+* 🧪 Local development
+* 🤖 CI/CD artifact generation
+* 📦 Offline / air-gapped deployments
+* 🐳 Container volume mounting
+* 🧱 Deterministic environment builds
 
 The produced sandbox is self-contained and ready to run.
 
@@ -38,15 +55,15 @@ The produced sandbox is self-contained and ready to run.
 
 ## ✨ Features
 
-- Fully portable sandbox output  
-- Deterministic builds  
-- Cross-platform support  
-- Automatic dependency retrieval  
-- Offline-friendly packaging  
-- CI/CD ready  
-- Clean rebuild support  
-- Chrome for Testing integration  
-- G4 tools staging  
+* Fully portable sandbox output
+* Deterministic builds
+* Cross-platform support
+* Automatic dependency retrieval
+* Offline-friendly packaging
+* CI/CD ready
+* Clean rebuild support
+* Chrome for Testing integration
+* G4 tools staging
 
 ---
 
@@ -54,16 +71,16 @@ The produced sandbox is self-contained and ready to run.
 
 ### Windows
 
-- PowerShell 5.x **or** PowerShell Core  
-- Internet access (for initial build)  
-- Sufficient disk space  
+* PowerShell 5.x **or** PowerShell Core
+* Internet access (for initial build)
+* Sufficient disk space
 
 ### Linux / macOS
 
-- **PowerShell Core (x64 only)**  
-- `tar` available on PATH  
-- Internet access  
-- x64 architecture  
+* **PowerShell Core (x64 only)**
+* `tar` available on PATH
+* Internet access
+* x64 architecture
 
 ⚠️ **ARM is currently not supported**
 
@@ -76,7 +93,7 @@ The produced sandbox is self-contained and ready to run.
 ```bash
 git clone https://github.com/g4-api/g4-sandbox.git
 cd g4-sandbox
-````
+```
 
 ---
 
@@ -106,7 +123,7 @@ pwsh ./Publish-G4Sandbox.ps1 \
 
 ## 🧰 PowerShell Installation (macOS/Linux)
 
-PowerShell Core **must be installed manually** on non-Windows systems.
+PowerShell Core **must be installed manually** on non-Windows systems when you are running the builder directly instead of using the one-line bootstrap installer.
 
 ### 🔗 Official Microsoft installation guide
 
@@ -141,7 +158,7 @@ pwsh --version
 
 ---
 
-## ▶️ Usage
+## Usage
 
 Run the script with your desired parameters:
 
@@ -176,7 +193,7 @@ The output directory will contain all required runtime assets.
 
 ---
 
-## ⚠️ Compatibility Notes
+## Compatibility Notes
 
 * Linux/macOS support is **x64 only**
 * ARM is not currently supported
@@ -188,4 +205,4 @@ The output directory will contain all required runtime assets.
 
 ## 📜 License
 
-This project is licensed under the **MIT License**.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
