@@ -21,16 +21,27 @@ function Remove-Workdir {
     }
 }
 
+function Confirm-Windows {
+    if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
+        throw 'This installer can only run on Windows.'
+    }
+}
+
 function Get-PowerShellArchitecture {
-    $arch = "$env:PROCESSOR_ARCHITEW6432"
-    if (-not $arch) {
-        $arch = "$env:PROCESSOR_ARCHITECTURE"
+    if (-not [System.Environment]::Is64BitOperatingSystem) {
+        throw 'x86 operating systems are not supported.'
+    }
+
+    $arch = if ($env:PROCESSOR_ARCHITEW6432) {
+        $env:PROCESSOR_ARCHITEW6432
+    }
+    else {
+        $env:PROCESSOR_ARCHITECTURE
     }
 
     switch ($arch.ToUpperInvariant()) {
-        'AMD64' { return 'x64' }
         'ARM64' { return 'win-arm64' }
-        'X86'   { throw 'x86 is not supported.' }
+        'AMD64' { return 'x64' }
         default { throw "Unsupported architecture: $arch" }
     }
 }
