@@ -59,35 +59,46 @@ download_portable_powershell() {
   local arch
   local ps_version
   local ps_file
+  local api_url
   local ps_url
 
   ps_version="7.6.0"
   arch="$(get_ps_arch)"
 
   case "$arch" in
-    x64)
-      ps_file="powershell-${ps_version}-linux-x64.tar.gz"
-      ;;
-    arm64)
-      ps_file="powershell-${ps_version}-linux-arm64.tar.gz"
-      ;;
+    x64)   ps_file="powershell-${ps_version}-linux-x64.tar.gz" ;;
+    arm64) ps_file="powershell-${ps_version}-linux-arm64.tar.gz" ;;
     *)
       echo "Unsupported architecture: $arch"
       exit 1
       ;;
   esac
 
-  ps_url="https://github.com/PowerShell/PowerShell/releases/download/v${ps_version}/${ps_file}"
+  api_url="https://api.github.com/repos/PowerShell/PowerShell/releases/tags/v${ps_version}"
 
-  log "Downloading portable PowerShell ${ps_version} for linux-${arch}"
+  log "Resolving PowerShell ${ps_version} asset for linux-${arch}"
   mkdir -p "$PS_DIR" "$TOOLS_DIR"
 
-  curl -fL "$ps_url" -o "$PS_ARCHIVE"
+  ps_url="$(curl --fail --location --silent --show-error \
+    --user-agent "Mozilla/5.0" \
+    "$api_url" | grep -o "https://[^[:space:]\"]*${ps_file}" | head -1)"
 
-  if ! gzip -t "$PS_ARCHIVE" 2>/dev/null; then
-    echo "Downloaded file is not a valid gzip archive:"
+  if [ -z "$ps_url" ]; then
+    echo "Failed to resolve download URL for $ps_file"
+    exit 1
+  fi
+
+  log "Downloading portable PowerShell ${ps_version}"
+  curl --fail --location --silent --show-error \
+    --user-agent "Mozilla/5.0" \
+    --output "$PS_ARCHIVE" \
+    "$ps_url"
+
+  if ! file "$PS_ARCHIVE" | grep -qi 'gzip compressed'; then
+    echo "Downloaded file is not a gzip archive."
     file "$PS_ARCHIVE" || true
-    echo "Source URL: $ps_url"
+    echo
+    head -20 "$PS_ARCHIVE" || true
     exit 1
   fi
 
