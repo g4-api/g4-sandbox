@@ -39,7 +39,35 @@ install_base_tools() {
   elif command -v apk >/dev/null 2>&1; then
     $SUDO apk add --no-cache curl git tar gzip ca-certificates file
   else
-    echo "Unsupported package manager. Please install curl, git, tar, gzip manually."
+    echo "Unsupported package manager. Please install curl, git, tar, gzip, and file manually."
+    exit 1
+  fi
+}
+
+install_icu() {
+  log "Installing ICU runtime"
+
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get update
+
+    if ! $SUDO apt-get install -y libicu-dev; then
+      $SUDO apt-get install -y libicu72 || \
+      $SUDO apt-get install -y libicu71 || \
+      $SUDO apt-get install -y libicu70 || \
+      $SUDO apt-get install -y libicu67 || \
+      $SUDO apt-get install -y libicu66 || \
+      $SUDO apt-get install -y libicu63
+    fi
+  elif command -v dnf >/dev/null 2>&1; then
+    $SUDO dnf install -y libicu
+  elif command -v yum >/dev/null 2>&1; then
+    $SUDO yum install -y libicu
+  elif command -v zypper >/dev/null 2>&1; then
+    $SUDO zypper --non-interactive install libicu
+  elif command -v apk >/dev/null 2>&1; then
+    $SUDO apk add --no-cache icu-libs
+  else
+    echo "Unsupported package manager. Please install ICU manually."
     exit 1
   fi
 }
@@ -59,36 +87,29 @@ download_portable_powershell() {
   local arch
   local ps_version
   local ps_file
-  local api_url
   local ps_url
 
   ps_version="7.6.0"
   arch="$(get_ps_arch)"
 
   case "$arch" in
-    x64)   ps_file="powershell-${ps_version}-linux-x64.tar.gz" ;;
-    arm64) ps_file="powershell-${ps_version}-linux-arm64.tar.gz" ;;
+    x64)
+      ps_file="powershell-${ps_version}-linux-x64.tar.gz"
+      ;;
+    arm64)
+      ps_file="powershell-${ps_version}-linux-arm64.tar.gz"
+      ;;
     *)
       echo "Unsupported architecture: $arch"
       exit 1
       ;;
   esac
 
-  api_url="https://api.github.com/repos/PowerShell/PowerShell/releases/tags/v${ps_version}"
+  ps_url="https://github.com/PowerShell/PowerShell/releases/download/v${ps_version}/${ps_file}"
 
-  log "Resolving PowerShell ${ps_version} asset for linux-${arch}"
+  log "Downloading portable PowerShell ${ps_version} for linux-${arch}"
   mkdir -p "$PS_DIR" "$TOOLS_DIR"
 
-  ps_url="$(curl --fail --location --silent --show-error \
-    --user-agent "Mozilla/5.0" \
-    "$api_url" | grep -o "https://[^[:space:]\"]*${ps_file}" | head -1)"
-
-  if [ -z "$ps_url" ]; then
-    echo "Failed to resolve download URL for $ps_file"
-    exit 1
-  fi
-
-  log "Downloading portable PowerShell ${ps_version}"
   curl --fail --location --silent --show-error \
     --user-agent "Mozilla/5.0" \
     --output "$PS_ARCHIVE" \
@@ -96,8 +117,10 @@ download_portable_powershell() {
 
   if ! file "$PS_ARCHIVE" | grep -qi 'gzip compressed'; then
     echo "Downloaded file is not a gzip archive."
+    echo "Detected type:"
     file "$PS_ARCHIVE" || true
     echo
+    echo "First 20 lines of response:"
     head -20 "$PS_ARCHIVE" || true
     exit 1
   fi
@@ -128,6 +151,7 @@ main() {
 
   require_sudo
   install_base_tools
+  install_icu
   download_portable_powershell
   clone_repo
   publish_sandbox
