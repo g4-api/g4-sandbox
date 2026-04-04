@@ -22,10 +22,16 @@ function Remove-Workdir {
 }
 
 function Get-PowerShellArchitecture {
-    switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-        'X64'   { return 'x64' }
-        'Arm64' { return 'win-arm64' }
-        default { throw "Unsupported architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
+    $arch = "$env:PROCESSOR_ARCHITEW6432"
+    if (-not $arch) {
+        $arch = "$env:PROCESSOR_ARCHITECTURE"
+    }
+
+    switch ($arch.ToUpperInvariant()) {
+        'AMD64' { return 'x64' }
+        'ARM64' { return 'win-arm64' }
+        'X86'   { throw 'x86 is not supported.' }
+        default { throw "Unsupported architecture: $arch" }
     }
 }
 
