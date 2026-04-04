@@ -29,15 +29,15 @@ require_sudo() {
 install_base_tools() {
   if command -v apt-get >/dev/null 2>&1; then
     $SUDO apt-get update
-    $SUDO apt-get install -y curl git tar gzip ca-certificates
+    $SUDO apt-get install -y curl git tar gzip ca-certificates file
   elif command -v dnf >/dev/null 2>&1; then
-    $SUDO dnf install -y curl git tar gzip ca-certificates
+    $SUDO dnf install -y curl git tar gzip ca-certificates file
   elif command -v yum >/dev/null 2>&1; then
-    $SUDO yum install -y curl git tar gzip ca-certificates
+    $SUDO yum install -y curl git tar gzip ca-certificates file
   elif command -v zypper >/dev/null 2>&1; then
-    $SUDO zypper --non-interactive install curl git tar gzip ca-certificates
+    $SUDO zypper --non-interactive install curl git tar gzip ca-certificates file
   elif command -v apk >/dev/null 2>&1; then
-    $SUDO apk add --no-cache curl git tar gzip ca-certificates
+    $SUDO apk add --no-cache curl git tar gzip ca-certificates file
   else
     echo "Unsupported package manager. Please install curl, git, tar, gzip manually."
     exit 1
@@ -57,12 +57,40 @@ get_ps_arch() {
 
 download_portable_powershell() {
   local arch
+  local ps_version
+  local ps_file
+  local ps_url
+
+  ps_version="7.6.0"
   arch="$(get_ps_arch)"
 
-  log "Downloading portable PowerShell for linux-$arch"
+  case "$arch" in
+    x64)
+      ps_file="powershell-${ps_version}-linux-x64.tar.gz"
+      ;;
+    arm64)
+      ps_file="powershell-${ps_version}-linux-arm64.tar.gz"
+      ;;
+    *)
+      echo "Unsupported architecture: $arch"
+      exit 1
+      ;;
+  esac
+
+  ps_url="https://github.com/PowerShell/PowerShell/releases/download/v${ps_version}/${ps_file}"
+
+  log "Downloading portable PowerShell ${ps_version} for linux-${arch}"
   mkdir -p "$PS_DIR" "$TOOLS_DIR"
 
-  curl -fsSL "https://aka.ms/powershell-release?tag=stable&os=linux&arch=$arch" -o "$PS_ARCHIVE"
+  curl -fL "$ps_url" -o "$PS_ARCHIVE"
+
+  if ! gzip -t "$PS_ARCHIVE" 2>/dev/null; then
+    echo "Downloaded file is not a valid gzip archive:"
+    file "$PS_ARCHIVE" || true
+    echo "Source URL: $ps_url"
+    exit 1
+  fi
+
   tar -xzf "$PS_ARCHIVE" -C "$PS_DIR"
   chmod +x "$PS_DIR/pwsh"
 }
