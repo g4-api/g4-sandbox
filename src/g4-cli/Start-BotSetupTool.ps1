@@ -111,7 +111,7 @@ function Import-EnvironmentVariablesFile {
     #>
     [CmdletBinding()]
     param(
-        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot ".env"),
+        [string]  $EnvironmentFilePath            = (Join-Path $PSScriptRoot "../.env"),
         [string[]]$SkipNames                      = @(),
         [string[]]$AdditionalEnvironmentVariables = @()
     )
