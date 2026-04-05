@@ -10,6 +10,7 @@ param (
     [Parameter(Mandatory = $false)] [string] $Token,
     [Parameter(Mandatory = $false)] [switch] $Docker
 )
+Set-ExecutionPolicy -ExecutionPolicy Bypass
 
 # Change to the script's own directory so any relative paths resolve correctly
 Set-Location -Path $PSScriptRoot
@@ -30,7 +31,7 @@ $botConfiguration = New-BotConfiguration `
     -CallbackIngress     $CallbackIngress `
     -CallbackUri         $CallbackUri `
     -DriverBinaries      $DriverBinaries `
-    -EnvironmentFilePath (Join-Path $PSScriptRoot ".env") `
+    -EnvironmentFilePath (Join-Path $PSScriptRoot "../.env") `
     -HubUri              $HubUri `
     -Token               $Token
 
