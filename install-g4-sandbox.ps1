@@ -1,17 +1,16 @@
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'SilentlyContinue'
 
-$repoUrl = 'https://github.com/g4-api/g4-sandbox.git'
+$repoUrl     = 'https://github.com/g4-api/g4-sandbox.git'
 $rootWorkDir = Join-Path $env:TEMP 'g4-sandbox-bootstrap'
-$repoDir = Join-Path $rootWorkDir 'repo'
-$srcDir = Join-Path $repoDir 'src'
-$toolsDir = Join-Path $rootWorkDir 'tools'
-$psDir = Join-Path $toolsDir 'powershell'
-$psZip = Join-Path $toolsDir 'powershell.zip'
-$outputDir = 'C:\g4-sandbox'
+$repoDir     = Join-Path $rootWorkDir 'repo'
+$srcDir      = Join-Path $repoDir 'src'
+$toolsDir    = Join-Path $rootWorkDir 'tools'
+$psDir       = Join-Path $toolsDir 'powershell'
+$psZip       = Join-Path $toolsDir 'powershell.zip'
+$outputDir   = 'C:\g4-sandbox'
 
 function Write-Log {
     param([string]$Message)
-    Write-Host ""
     Write-Host "[+] $Message"
 }
 
@@ -54,39 +53,6 @@ function Ensure-Git {
     throw "git is required but was not found in PATH."
 }
 
-function Download-PortablePowerShell {
-    $arch = Get-PowerShellArchitecture
-    $version = '7.6.0'
-
-    if ($arch -eq 'x64') {
-        $psFile = "PowerShell-$version-win-x64.zip"
-    }
-    elseif ($arch -eq 'win-arm64') {
-        $psFile = "PowerShell-$version-win-arm64.zip"
-    }
-    else {
-        throw "Unsupported architecture mapping: $arch"
-    }
-
-    $psUrl = "https://github.com/PowerShell/PowerShell/releases/download/v$version/$psFile"
-
-    Write-Log "Downloading portable PowerShell $version for $arch"
-
-    New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
-    New-Item -ItemType Directory -Path $psDir -Force | Out-Null
-
-    Invoke-WebRequest -Uri $psUrl -OutFile $psZip -UseBasicParsing
-
-    Expand-Archive -Path $psZip -DestinationPath $psDir -Force
-
-    $pwshPath = Join-Path $psDir 'pwsh.exe'
-    if (-not (Test-Path $pwshPath)) {
-        throw "Portable pwsh.exe was not found after extraction."
-    }
-
-    return $pwshPath
-}
-
 function Clone-Repo {
     Write-Log "Cloning g4-sandbox"
     New-Item -ItemType Directory -Path $rootWorkDir -Force | Out-Null
@@ -104,7 +70,10 @@ function Publish-Sandbox {
 
     Push-Location $srcDir
     try {
-        & $PwshPath -NoLogo -NoProfile -File '.\Publish-G4Sandbox.ps1' `
+        & $PwshPath `
+            -NoLogo `
+            -NoProfile `
+            -File            '.\Publish-G4Sandbox.ps1' `
             -OperatingSystem 'Windows' `
             -OutputDirectory $outputDir
     }
@@ -116,9 +85,8 @@ function Publish-Sandbox {
 try {
     Remove-Workdir
     Ensure-Git
-    $pwshPath = Download-PortablePowerShell
     Clone-Repo
-    Publish-Sandbox -PwshPath $pwshPath
+    Publish-Sandbox -PwshPath 'powershell'
     Write-Log 'Done'
 }
 finally {
