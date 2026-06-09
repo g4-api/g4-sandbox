@@ -65,7 +65,7 @@ param(
     #   - Drives platform-specific artifact selection across the pipeline
     #   - Must match supported ValidateSet values
     [ValidateSet("Linux", "MacOs", "Windows")]
-    [string]$OperatingSystem = "Windows",
+    [string]$OperatingSystem = "Linux",
     
     # Output directory for the assembled sandbox/package.
     #
@@ -1762,241 +1762,6 @@ function Get-PowershellCore {
 }
 
 # ---------------------------------------------------------------------------
-# Function: Get-Python
-#
-# Purpose:
-#   Downloads the official Python offline installer for the selected operating
-#   system and places it (without extraction) into a destination directory.
-#
-# Description:
-#   - Optionally cleans the destination directory before download
-#   - Resolves the requested Python version (exact match), or falls back to the
-#     latest stable Python 3 release, using the python.org downloads JSON API
-#   - Resolves the OS-appropriate installer file via the release_file API:
-#       * Windows: full offline installer (python-<ver>-amd64.exe)
-#       * MacOs:   universal2 installer (python-<ver>-macos11.pkg)
-#   - Downloads the installer file into the destination directory (no extraction)
-#
-# Notes:
-#   - Python does not ship an official binary installer for Linux (source only),
-#     so this function is a no-op for Linux targets.
-#   - x64 only, consistent with the rest of the pipeline.
-#
-# Compatibility:
-#   - PowerShell 5.x (Windows)
-#   - PowerShell Core (Windows, Linux, macOS)
-#
-# Assumptions:
-#   - Network access to www.python.org is available
-#   - The python.org downloads API endpoints remain stable:
-#       https://www.python.org/api/v2/downloads/release/
-#       https://www.python.org/api/v2/downloads/release_file/
-# ---------------------------------------------------------------------------
-function Get-Python {
-    param(
-        # Operating system selector used when matching the installer file.
-        [ValidateSet("Linux", "MacOs", "Windows")]
-        [string]$OperatingSystem,
-
-        # Destination directory where the installer file will be saved.
-        [string]$DestinationDirectory,
-
-        # Python version to download.
-        #
-        # Notes:
-        #   - Expected format: "3.12.4"
-        #   - If not specified (or not found), the latest stable Python 3 release is used.
-        [string]$Version,
-
-        # When specified, removes the destination directory before download.
-        [Switch]$Clean
-    )
-
-    # Python provides no official binary installer for Linux (source only).
-    # Treat Linux as a no-op so the pipeline can call this unconditionally.
-    if ($OperatingSystem -eq "Linux") {
-        Write-Warning "Python does not provide an official Linux installer (source only). Skipping Python installer download."
-        return
-    }
-
-    # Clean the destination directory if explicitly requested.
-    #
-    # Behavior:
-    #   - Removes the directory and all its contents
-    #   - Only executed when -Clean is specified
-    if ($Clean -and (Test-Path -Path $DestinationDirectory)) {
-
-        Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
-
-        $ProgressPreference = 'SilentlyContinue'
-        Remove-Item `
-            -Path    $DestinationDirectory `
-            -Recurse `
-            -Force
-        $ProgressPreference = 'Continue'
-    }
-
-    # Ensure the destination directory exists.
-    # `-Force` creates the directory if it does not exist.
-    New-Item -Path $DestinationDirectory -ItemType Directory -Force | Out-Null
-
-    # Define HTTP headers.
-    #
-    # Notes:
-    #   - A User-Agent header reduces the likelihood of being blocked by upstream servers
-    #   - This is an unauthenticated request
-    $headers = @{
-        'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-    }
-
-    # Retrieve the published Python releases from the downloads JSON API.
-    #
-    # Notes:
-    #   - Each entry includes: name (e.g. "Python 3.12.4"), version (2 or 3),
-    #     pre_release (bool), is_published (bool), resource_uri (.../release/<id>/)
-    $releasesUrl = "https://www.python.org/api/v2/downloads/release/?is_published=true"
-
-    Write-Host "Retrieving Python releases metadata: $($releasesUrl)" -ForegroundColor DarkGray
-
-    $response = Invoke-WebRequest `
-        -Uri            $releasesUrl `
-        -Headers        $headers `
-        -Method         Get `
-        -UseBasicParsing
-
-    if (-not $response -or $response.StatusCode -ge 400) {
-        Write-Warning "Failed to retrieve Python releases metadata from: $($releasesUrl)"
-        return
-    }
-
-    $releases = $response.Content | ConvertFrom-Json
-
-    if (-not $releases -or $releases.Length -eq 0) {
-        Write-Warning "Python releases API returned no entries."
-        return
-    }
-
-    # Keep only stable Python 3 releases and project a clean version string.
-    #
-    # Notes:
-    #   - 'version' is the major series indicator (3 = Python 3)
-    #   - 'pre_release' excludes alpha/beta/rc builds
-    #   - The version string is parsed out of the 'name' field ("Python 3.12.4")
-    $candidates = $releases |
-    Where-Object { $_.version -eq 3 -and -not $_.pre_release } |
-    ForEach-Object {
-        $versionString = ($_.name -replace '^\s*Python\s+', '').Trim()
-        [PSCustomObject]@{
-            VersionString = $versionString
-            ResourceUri   = $_.resource_uri
-        }
-    } |
-    Where-Object { $_.VersionString -match '^\d+\.\d+\.\d+$' }
-
-    if (-not $candidates -or $candidates.Length -eq 0) {
-        Write-Warning "No stable Python 3 releases were resolved from the releases API."
-        return
-    }
-
-    # Resolve the release to download.
-    #
-    # Behavior:
-    #   - If -Version is provided: exact match, otherwise fall back to latest
-    #   - If -Version is not provided: pick the highest version
-    $selected = $null
-
-    if (-not [string]::IsNullOrWhiteSpace($Version)) {
-        $selected = $candidates | Where-Object { $_.VersionString -eq $Version.Trim() } | Select-Object -First 1
-        if (-not $selected) {
-            Write-Host "Requested Python version not found: '$($Version)'. Falling back to latest stable release." -ForegroundColor Cyan
-        }
-    }
-
-    if (-not $selected) {
-        $selected = $candidates | Sort-Object { [version]$_.VersionString } -Descending | Select-Object -First 1
-    }
-
-    Write-Host "Resolved Python version: $($selected.VersionString)" -ForegroundColor DarkGray
-
-    # Extract the numeric release id from the resource URI (.../release/<id>/).
-    $releaseId = [regex]::Match([string]$selected.ResourceUri, '(\d+)/?$').Groups[1].Value
-
-    if ([string]::IsNullOrWhiteSpace($releaseId)) {
-        Write-Warning "Could not resolve a release id from resource URI: '$($selected.ResourceUri)'."
-        return
-    }
-
-    # Retrieve the files attached to the resolved release.
-    $releaseFilesUrl = "https://www.python.org/api/v2/downloads/release_file/?release=$($releaseId)"
-
-    Write-Host "Retrieving Python release files metadata: $($releaseFilesUrl)" -ForegroundColor DarkGray
-
-    $filesResponse = Invoke-WebRequest `
-        -Uri            $releaseFilesUrl `
-        -Headers        $headers `
-        -Method         Get `
-        -UseBasicParsing
-
-    if (-not $filesResponse -or $filesResponse.StatusCode -ge 400) {
-        Write-Warning "Failed to retrieve Python release files metadata from: $($releaseFilesUrl)"
-        return
-    }
-
-    $releaseFiles = $filesResponse.Content | ConvertFrom-Json
-
-    if (-not $releaseFiles -or $releaseFiles.Length -eq 0) {
-        Write-Warning "Python release files API returned no entries for release id '$($releaseId)'."
-        return
-    }
-
-    # Select the OS-appropriate installer by URL.
-    #
-    # Notes:
-    #   - Windows: full offline installer 'python-<ver>-amd64.exe'
-    #     (the '-amd64.exe$' anchor excludes '-amd64-webinstall.exe' and the embed zip)
-    #   - MacOs:   universal2 installer 'python-<ver>-macos11.pkg'
-    $assetPattern = if ($OperatingSystem -eq "Windows") { '-amd64\.exe$' } else { '\.pkg$' }
-
-    $installerFile = $releaseFiles |
-    Where-Object { $_.url -match $assetPattern } |
-    Select-Object -First 1
-
-    if (-not $installerFile -or [string]::IsNullOrWhiteSpace($installerFile.url)) {
-        Write-Warning "No Python installer matching pattern '$($assetPattern)' was found for '$($OperatingSystem)' (version $($selected.VersionString))."
-        return
-    }
-
-    $downloadUrl = $installerFile.url
-
-    # Resolve the output file name from the URL (keep the original installer name).
-    # A fallback file name is used if URL parsing does not produce a file name.
-    $fileName = [System.IO.Path]::GetFileName([Uri]$downloadUrl)
-    if ([string]::IsNullOrWhiteSpace($fileName)) {
-        $fileName = "python-installer-$([Guid]::NewGuid().ToString('N')).bin"
-    }
-
-    $outFile = Join-Path -Path $DestinationDirectory -ChildPath $fileName
-
-    Write-Host "Downloading Python installer to: '$($outFile)'" -ForegroundColor DarkGray
-
-    try {
-        Invoke-WebRequest `
-            -Uri      $downloadUrl `
-            -Method   Get `
-            -OutFile  $outFile `
-            -Headers  $headers `
-            -UseBasicParsing
-    }
-    catch {
-        Write-Warning "Download failed for: $($downloadUrl)"
-        Write-Warning $_.Exception.Message
-        return
-    }
-
-    Write-Host "Python installer download completed. Destination directory: '$($DestinationDirectory)'" -ForegroundColor Cyan
-}
-
-# ---------------------------------------------------------------------------
 # Function: Get-VSCode
 #
 # Purpose:
@@ -2703,7 +2468,7 @@ $sourceDirectory = [System.IO.Path]::Combine($PSScriptRoot)
 #   - "a" acts as the final assembled stage
 #   - "_work" stores temporary archives during download/extraction
 $stageDirectory = Join-Path $baseDirecotry "a"
-$workDirectory  = Join-Path $baseDirecotry "_work"
+$workDirectory = Join-Path $baseDirecotry "_work"
 
 # Structured stage subdirectories.
 #
@@ -2712,9 +2477,9 @@ $workDirectory  = Join-Path $baseDirecotry "_work"
 #   - Drivers: WebDriver binaries
 #   - runtime: dotnet/jdk/nodejs
 #   - utilities: supporting tools (VS Code, trackers, etc.)
-$browsersDirectory  = Join-Path $stageDirectory "browsers"
-$driversDirectory   = Join-Path $stageDirectory "drivers"
-$runtimeDirectory   = Join-Path $stageDirectory "runtime"
+$browsersDirectory = Join-Path $stageDirectory "browsers"
+$driversDirectory = Join-Path $stageDirectory "drivers"
+$runtimeDirectory = Join-Path $stageDirectory "runtime"
 $utilitiesDirectory = Join-Path $stageDirectory "bot-utilities"
 
 # Tool definitions to download from GitHub releases.
@@ -2728,9 +2493,9 @@ $utilitiesDirectory = Join-Path $stageDirectory "bot-utilities"
 $tools = @(
     @{
         AssetPattern         = $null
-        DestinationDirectory = (Join-Path $utilitiesDirectory "ocr-inspector-win-x64")
+        DestinationDirectory = (Join-Path $utilitiesDirectory "cursor-coordinate-tracker-win-x64")
         DestinationFile      = $null
-        GitHubRepository     = "$($baseGithubUrl)/ocr-inspector"
+        GitHubRepository     = "$($baseGithubUrl)/cursor-coordinate-tracker"
         WindowsOnly          = $true
     },
     @{
@@ -2774,6 +2539,13 @@ $tools = @(
         DestinationFile      = $null
         GitHubRepository     = "$($baseGithubUrl)/uia-peek"
         WindowsOnly          = $true
+    },
+    @{
+        AssetPattern         = $null
+        DestinationDirectory = (Join-Path $utilitiesDirectory "uia-xpath-tester-win-x64")
+        DestinationFile      = $null
+        GitHubRepository     = "$($baseGithubUrl)/uia-xpath-tester"
+        WindowsOnly          = $true
     }
 )
 
@@ -2797,15 +2569,6 @@ $vscodeExtensions = @(
     "ms-vscode.powershell",
     "ms-vscode-remote.remote-wsl",
     "sonarsource.sonarlint-vscode"
-)
-
-# Node.js global dependencies to install into the bundled runtime.
-#
-# Notes:
-#   - Installed globally into runtime/nodejs via the bundled npm
-#   - Entries may be bare ("allure") or version-pinned ("allure@2.32.0")
-$nodejsDependencies = @(
-    "allure"
 )
 
 # Download Chrome + ChromeDriver.
@@ -2854,12 +2617,6 @@ Get-PowershellCore `
     -OperatingSystem      $OperatingSystem `
     -ArchiveDirectory     $workDirectory `
     -DestinationDirectory (Join-Path $utilitiesDirectory "powershell")
-
-# Download the Python offline installer (Windows/macOS only).
-Get-Python `
-    -OperatingSystem      $OperatingSystem `
-    -DestinationDirectory (Join-Path $utilitiesDirectory "python-installer") `
-    -Clean
 
 # GitHub Release Tools
 foreach ($tool in $tools) {
@@ -3009,52 +2766,6 @@ foreach ($sandboxSource in $sandboxSources) {
         -Destination $sandboxSource.Destination `
         -Recurse `
         -Force
-}
-
-# Install Node.js global dependencies into the bundled runtime.
-#
-# Notes:
-#   - This is the last staging step before files are copied into the sandbox,
-#     so the installed modules are included in the final bundle.
-#   - Uses the bundled (staged) npm only. If the staged node/npm cannot be
-#     located (e.g. building a Linux bundle on a Windows host), the phase is
-#     skipped with a warning rather than aborting the build.
-#   - Packages are installed globally with --prefix pointing at runtime/nodejs
-#     (Windows' default global prefix is %APPDATA%\npm, not the node dir).
-if ($nodejsDependencies -and $nodejsDependencies.Count -gt 0) {
-
-    $nodejsRuntimeDirectory = Join-Path $runtimeDirectory "nodejs"
-
-    # Resolve the staged node binary and npm CLI entry point per target OS.
-    if ($OperatingSystem -eq "Windows") {
-        $nodeExecutable = Join-Path $nodejsRuntimeDirectory "node.exe"
-        $npmCli = [System.IO.Path]::Combine($nodejsRuntimeDirectory, "node_modules", "npm", "bin", "npm-cli.js")
-    }
-    else {
-        $nodeExecutable = [System.IO.Path]::Combine($nodejsRuntimeDirectory, "bin", "node")
-        $npmCli = [System.IO.Path]::Combine($nodejsRuntimeDirectory, "lib", "node_modules", "npm", "bin", "npm-cli.js")
-    }
-
-    if (-not (Test-Path -Path $nodeExecutable) -or -not (Test-Path -Path $npmCli)) {
-        Write-Warning "Bundled Node.js runtime not found (node: '$($nodeExecutable)', npm: '$($npmCli)'). Skipping Node.js dependency installation."
-    }
-    else {
-        foreach ($dependency in $nodejsDependencies) {
-
-            Write-Host "Installing Node.js dependency (global): '$($dependency)'" -ForegroundColor DarkGray
-
-            # Invoke the bundled node against npm-cli.js to avoid relying on
-            # shell shims or PATH. --prefix forces the install into the bundle.
-            & $nodeExecutable $npmCli install --global $dependency --prefix $nodejsRuntimeDirectory
-
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Failed to install Node.js dependency: '$($dependency)' (exit code: $($LASTEXITCODE))."
-            }
-            else {
-                Write-Host "Installed Node.js dependency: '$($dependency)'" -ForegroundColor Cyan
-            }
-        }
-    }
 }
 
 # Remove existing sandbox directory if requested.
