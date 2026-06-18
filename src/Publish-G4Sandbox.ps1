@@ -2777,6 +2777,27 @@ $tools = @(
     }
 )
 
+# G4 Test Wright (portable test workbench). The release ships an OS-specific x64
+# archive (win-x64.zip / linux-x64.tar.gz); macOS is not bundled here. The entry
+# intentionally floats to the latest matching GitHub release asset and is added
+# conditionally so a null pattern (e.g. MacOs) never falls through to the
+# "first asset" selection in Get-G4Artifact.
+$testWrightAssetPattern = switch ($OperatingSystem.ToLower()) {
+    "windows" { "g4-test-wright-.*-win-x64\.zip" }
+    "linux"   { "g4-test-wright-.*-linux-x64\.tar\.gz" }
+    default   { $null }
+}
+
+if ($testWrightAssetPattern) {
+    $tools += @{
+        AssetPattern         = $testWrightAssetPattern
+        DestinationDirectory = (Join-Path $utilitiesDirectory "g4-test-wright")
+        DestinationFile      = $null
+        GitHubRepository     = "$($baseGithubUrl)/g4-test-wright"
+        WindowsOnly          = $false
+    }
+}
+
 # VS Code extensions to pre-download as VSIX packages.
 #
 # Notes:
@@ -3211,3 +3232,4 @@ Write-Host "   G4 Sandbox creation completed successfully"                -Foreg
 Write-Host "   Location: $($sandboxDirectory)"                            -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor DarkGray
 Write-Host ""
+
