@@ -1085,6 +1085,176 @@ function Get-G4Artifact {
 }
 
 # ---------------------------------------------------------------------------
+# Function: Get-GitHubBranchArchive
+#
+# Purpose:
+#   Downloads a GitHub branch source archive (the "Download ZIP" zip produced by
+#   github.com/<owner>/<repo>/archive/refs/heads/<branch>.zip) and extracts it
+#   into a destination directory in a flat, easy-to-use layout.
+#
+# Description:
+#   - Optionally cleans the destination directory before installation
+#   - Builds the branch-archive download URL for the requested repository/branch
+#   - Downloads the archive into an archive directory using a deterministic name
+#   - Extracts the archive into the destination directory
+#   - Moves extracted contents up one level to avoid a nested
+#     "<repo>-<branch>" folder
+#
+# Notes:
+#   - This targets branch source archives, NOT GitHub release assets. Use
+#     Get-G4Artifact for release-driven downloads.
+#   - Branch archives always reflect the current head of the branch at build
+#     time and are therefore not reproducible across runs.
+#
+# Compatibility:
+#   - PowerShell 5.x (Windows)
+#   - PowerShell Core (Windows, Linux, macOS)
+#
+# Assumptions:
+#   - Network access to github.com is available
+#   - The branch-archive URL convention remains stable:
+#       https://github.com/<owner>/<repo>/archive/refs/heads/<branch>.zip
+# ---------------------------------------------------------------------------
+function Get-GitHubBranchArchive {
+    [CmdletBinding()]
+    param(
+        # GitHub repository in '<owner>/<repo>' form.
+        # Example: "g4-api/g4-pytest-wrapper"
+        [string]$Repository,
+
+        # Branch head to archive.
+        #
+        # Notes:
+        #   - Defaults to "main"
+        #   - Used both in the download URL and to resolve the expected
+        #     "<repo>-<branch>" top-level folder during flattening
+        [string]$Branch = "main",
+
+        # Directory used to store the downloaded archive file.
+        [string]$ArchiveDirectory,
+
+        # Destination directory where the archive will be extracted.
+        [string]$DestinationDirectory,
+
+        # When specified, removes the destination directory before extraction.
+        # This guarantees a clean, deterministic installation state.
+        [Switch]$Clean
+    )
+
+    # Validate the repository identity format.
+    #
+    # Notes:
+    #   - Must be '<owner>/<repo>' so the URL and folder name can be derived
+    $repositoryName = ($Repository -split '/')[-1]
+    if ([string]::IsNullOrWhiteSpace($Repository) -or [string]::IsNullOrWhiteSpace($repositoryName) -or $Repository -notmatch '/') {
+        Write-Warning "Repository must be in '<owner>/<repo>' form. Received: '$($Repository)'"
+        return
+    }
+
+    # Clean the destination directory if explicitly requested.
+    #
+    # Behavior:
+    #   - Removes the directory and all its contents
+    #   - Only executed when -Clean is specified
+    if ($Clean -and (Test-Path -Path $DestinationDirectory)) {
+
+        Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
+
+        $ProgressPreference = 'SilentlyContinue'
+        Remove-Item `
+            -Path    $DestinationDirectory `
+            -Recurse `
+            -Force
+        $ProgressPreference = 'Continue'
+    }
+
+    # Ensure the archive and destination directories exist.
+    # `-Force` creates the directories if they do not exist.
+    New-Item -Path $ArchiveDirectory     -ItemType Directory -Force | Out-Null
+    New-Item -Path $DestinationDirectory -ItemType Directory -Force | Out-Null
+
+    # Define HTTP headers.
+    #
+    # Notes:
+    #   - A User-Agent header reduces the likelihood of being blocked by upstream servers
+    #   - This is an unauthenticated request
+    $headers = @{
+        'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    }
+
+    # Build the branch-archive download URL.
+    #
+    # Example:
+    #   https://github.com/g4-api/g4-pytest-wrapper/archive/refs/heads/main.zip
+    $downloadUrl = "https://github.com/$($Repository)/archive/refs/heads/$($Branch).zip"
+
+    # Build a deterministic archive filename to avoid collisions in the archive
+    # directory (the raw asset name would just be "<branch>.zip").
+    $fileName = "$($repositoryName)-$($Branch).zip"
+    $outFile  = Join-Path -Path $ArchiveDirectory -ChildPath $fileName
+
+    Write-Host "Downloading GitHub branch archive from '$($downloadUrl)' to: '$($outFile)'" -ForegroundColor DarkGray
+
+    # Download the resolved branch archive.
+    #
+    # Notes:
+    #   - Any network/HTTP failure is handled in catch (non-fatal; build continues)
+    try {
+        Invoke-WebRequest `
+            -Uri      $downloadUrl `
+            -Method   Get `
+            -OutFile  $outFile `
+            -Headers  $headers `
+            -UseBasicParsing
+    }
+    catch {
+        Write-Warning "Download failed for: $($downloadUrl)"
+        Write-Warning $_.Exception.Message
+        return
+    }
+
+    Write-Host "Archive saved in: '$($ArchiveDirectory)'" -ForegroundColor DarkGray
+
+    # Extract the archive into the destination directory.
+    #
+    # -Force ensures existing files are overwritten if present.
+    Write-Host "Extracting archive '$($outFile)' into destination directory: '$($DestinationDirectory)'" -ForegroundColor Cyan
+
+    Expand-Archive `
+        -Path            $outFile `
+        -DestinationPath $DestinationDirectory `
+        -Force
+
+    # Flatten the extracted folder structure.
+    #
+    # Notes:
+    #   - GitHub branch archives extract into a single top-level directory:
+    #       <repo>-<branch>
+    #   - This step moves all contents up one level to place the source files
+    #     directly under the destination directory
+    $topLevelDirectory = Get-ChildItem -Path $DestinationDirectory -Directory |
+    Sort-Object Name |
+    Select-Object -First 1
+
+    if (-not $topLevelDirectory) {
+        Write-Warning "No extracted top-level directory was found in '$($DestinationDirectory)'"
+        return
+    }
+
+    Write-Host "Flattening extracted layout by moving contents from '$($topLevelDirectory.FullName)' to '$($DestinationDirectory)'" -ForegroundColor DarkGray
+
+    # Move all extracted contents (files + folders) up one level.
+    Get-ChildItem -Path $topLevelDirectory.FullName -Force | Move-Item -Destination $DestinationDirectory -Force
+
+    # Remove the now-empty top-level extracted directory.
+    $ProgressPreference = 'SilentlyContinue'
+    Remove-Item -Path $topLevelDirectory.FullName -Force
+    $ProgressPreference = 'Continue'
+
+    Write-Host "GitHub branch archive installation completed. Destination directory: '$($DestinationDirectory)'" -ForegroundColor Cyan
+}
+
+# ---------------------------------------------------------------------------
 # Function: Get-NodeJs
 #
 # Purpose:
@@ -2798,6 +2968,22 @@ if ($testWrightAssetPattern) {
     }
 }
 
+# Branch-archive sources to download (GitHub source zips, not release assets).
+#
+# Notes:
+#   - Repository: GitHub '<owner>/<repo>'
+#   - Branch: branch head to archive (e.g. "main")
+#   - DestinationDirectory: where the flattened source will land
+#   - WindowsOnly: skip archive when not running on Windows
+$archives = @(
+    @{
+        Repository           = "g4-api/g4-pytest-wrapper"
+        Branch               = "main"
+        DestinationDirectory = (Join-Path $utilitiesDirectory "g4-pytest-wrapper")
+        WindowsOnly          = $false
+    }
+)
+
 # VS Code extensions to pre-download as VSIX packages.
 #
 # Notes:
@@ -2901,6 +3087,22 @@ foreach ($tool in $tools) {
         -DestinationDirectory $tool.DestinationDirectory `
         -DestinationFile      $tool.DestinationFile `
         -GitHubRepository     $tool.GitHubRepository
+}
+
+# GitHub Branch Archives
+foreach ($archive in $archives) {
+
+    # Skip Windows-only archives when not running on Windows.
+    if ($archive.WindowsOnly -and $OperatingSystem.ToUpper() -ne "WINDOWS") {
+        continue
+    }
+
+    # Download + extract + flatten the branch source archive.
+    Get-GitHubBranchArchive `
+        -Repository           $archive.Repository `
+        -Branch               $archive.Branch `
+        -ArchiveDirectory     $workDirectory `
+        -DestinationDirectory $archive.DestinationDirectory
 }
 
 # VSIX Extensions (Offline Packaging)
