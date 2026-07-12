@@ -32,7 +32,31 @@ open_terminal() {
 # Start the G4 Hub in its own terminal (reuses start-hub.sh).
 open_terminal "G4 Hub" "'$SCRIPT_DIR/start-hub.sh'"
 
-# Launch VS Code if the CLI is available; skip silently otherwise.
-if command -v code >/dev/null 2>&1; then
-    code &
+# Install the bundled G4 engine client extension if this VS Code does not have it.
+extension_id="g4-api.g4-engine-client"
+vs_code_cli="$SCRIPT_DIR/bot-utilities/vs-code/bin/code"
+vs_code_exe="$SCRIPT_DIR/bot-utilities/vs-code/code"
+vsix_dir="$SCRIPT_DIR/bot-utilities/vsixs"
+
+if [[ -x "$vs_code_cli" ]]; then
+    if ! "$vs_code_cli" --list-extensions | grep -qi "^${extension_id}$"; then
+        vsix_file="$(find "$vsix_dir" -maxdepth 1 -type f -name "${extension_id}*.vsix" 2>/dev/null | sort -Vr | head -n 1 || true)"
+
+        if [[ -n "$vsix_file" ]]; then
+            "$vs_code_cli" --install-extension "$vsix_file" || echo "Failed to install VS Code extension: $vsix_file" >&2
+        else
+            echo "VSIX file was not found: $vsix_dir/${extension_id}*.vsix" >&2
+        fi
+    fi
+else
+    echo "Bundled VS Code CLI was not found or is not executable: $vs_code_cli" >&2
+fi
+
+# Always launch bundled VS Code when the executable is available.
+if [[ -x "$vs_code_exe" ]]; then
+    "$vs_code_exe" &
+elif [[ -x "$vs_code_cli" ]]; then
+    "$vs_code_cli" &
+else
+    echo "Bundled VS Code executable was not found: $vs_code_exe" >&2
 fi
