@@ -2939,11 +2939,18 @@ $tools = @(
         WindowsOnly          = $true
     },
     @{
-        AssetPattern         = $null
+        AssetPattern         = "UiaPeek.*win-x64.zip"
         DestinationDirectory = (Join-Path $utilitiesDirectory "uia-peek-win-x64")
         DestinationFile      = $null
         GitHubRepository     = "$($baseGithubUrl)/uia-peek"
         WindowsOnly          = $true
+    },
+    @{
+        AssetPattern         = "ChromiumPeek.*-x64.zip"
+        DestinationDirectory = (Join-Path $utilitiesDirectory "chromium-peek-x64")
+        DestinationFile      = $null
+        GitHubRepository     = "$($baseGithubUrl)/uia-peek"
+        WindowsOnly          = $false
     }
 )
 
