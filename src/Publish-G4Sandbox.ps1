@@ -2939,17 +2939,17 @@ $tools = @(
         WindowsOnly          = $true
     },
     @{
-        AssetPattern         = "UiaPeek.*win-x64.zip"
-        DestinationDirectory = (Join-Path $utilitiesDirectory "uia-peek-win-x64")
+        AssetPattern         = "uia-recorder\..*-win-x64\.zip"
+        DestinationDirectory = (Join-Path $utilitiesDirectory "uia-recorder-win-x64")
         DestinationFile      = $null
-        GitHubRepository     = "$($baseGithubUrl)/uia-peek"
+        GitHubRepository     = "$($baseGithubUrl)/g4-recorders"
         WindowsOnly          = $true
     },
     @{
-        AssetPattern         = "ChromiumPeek.*-x64.zip"
-        DestinationDirectory = (Join-Path $utilitiesDirectory "chromium-peek-x64")
+        AssetPattern         = "chromium-recorder\..*-x64\.zip"
+        DestinationDirectory = (Join-Path $utilitiesDirectory "chromium-recorder-x64")
         DestinationFile      = $null
-        GitHubRepository     = "$($baseGithubUrl)/uia-peek"
+        GitHubRepository     = "$($baseGithubUrl)/g4-recorders"
         WindowsOnly          = $false
     }
 )
