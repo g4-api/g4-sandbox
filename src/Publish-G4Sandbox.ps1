@@ -2946,6 +2946,13 @@ $tools = @(
         WindowsOnly          = $true
     },
     @{
+        AssetPattern         = "uia-path-finder\..*-win-x64\.zip"
+        DestinationDirectory = (Join-Path $utilitiesDirectory "uia-path-finder-win-x64")
+        DestinationFile      = $null
+        GitHubRepository     = "$($baseGithubUrl)/g4-recorders"
+        WindowsOnly          = $true
+    },
+    @{
         AssetPattern         = "chromium-recorder\..*-x64\.zip"
         DestinationDirectory = (Join-Path $utilitiesDirectory "chromium-recorder-x64")
         DestinationFile      = $null
