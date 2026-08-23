@@ -2887,6 +2887,14 @@ $driversDirectory   = Join-Path $stageDirectory "drivers"
 $runtimeDirectory   = Join-Path $stageDirectory "runtime"
 $utilitiesDirectory = Join-Path $stageDirectory "bot-utilities"
 
+# Resolve the Chromium recorder package from the same operating-system selection that drives Chrome and .NET.
+# Windows retains compatibility with legacy generic x64 releases while preferring the explicit platform suffix.
+$chromiumRecorderAssetPattern = switch ($OperatingSystem.ToLower()) {
+    "windows" { "chromium-recorder\..*-(win-)?x64\.zip" }
+    "linux"   { "chromium-recorder\..*-linux-x64\.tar\.gz" }
+    default   { "chromium-recorder\..*-x64\.zip" }
+}
+
 # Tool definitions to download from GitHub releases.
 #
 # Notes:
@@ -2953,7 +2961,7 @@ $tools = @(
         WindowsOnly          = $true
     },
     @{
-        AssetPattern         = "chromium-recorder\..*-x64\.zip"
+        AssetPattern         = $chromiumRecorderAssetPattern
         DestinationDirectory = (Join-Path $utilitiesDirectory "chromium-recorder-x64")
         DestinationFile      = $null
         GitHubRepository     = "$($baseGithubUrl)/g4-recorders"
@@ -3006,6 +3014,8 @@ $archives = @(
 $vscodeExtensions = @(
     "g4-api.g4-engine-client",
     "github.copilot-chat",
+    "jakubkozera.csharp-dev-tools",
+    "jakubkozera.ms-sql-manager",
     "ms-python.autopep8",
     "ms-python.black-formatter",
     "ms-python.debugpy",
@@ -3017,7 +3027,8 @@ $vscodeExtensions = @(
     "ms-python.vscode-python-envs",
     "ms-vscode.powershell",
     "ms-vscode-remote.remote-wsl",
-    "sonarsource.sonarlint-vscode"
+    "sonarsource.sonarlint-vscode",
+    "vscode-icons-team.vscode-icons"
 )
 
 # Node.js global dependencies to install into the bundled runtime.
