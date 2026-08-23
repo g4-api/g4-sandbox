@@ -3099,7 +3099,10 @@ function Copy-SelectedG4AiAssets {
     if ($agentNames.Count -eq 0) { $agentNames = @($Inventory.Agents.Keys | Sort-Object) }
     foreach ($name in $agentNames) {
         $key = ([string]$name).ToLowerInvariant()
-        if (-not $Inventory.Agents.ContainsKey($key)) { throw "Unknown agent requested by ai-assets.json: '$name'." }
+        if (-not $Inventory.Agents.ContainsKey($key)) {
+            Write-Warning "Skipping agent '$name' because it was requested by ai-assets.json but is absent from the release."
+            continue
+        }
         Copy-Item -LiteralPath $Inventory.Agents[$key].FullName -Destination $agentsDestination -Force
     }
 
@@ -3107,7 +3110,10 @@ function Copy-SelectedG4AiAssets {
     if ($skillNames.Count -eq 0) { $skillNames = @($Inventory.Skills.Keys | Sort-Object) }
     foreach ($name in $skillNames) {
         $key = ([string]$name).ToLowerInvariant()
-        if (-not $Inventory.Skills.ContainsKey($key)) { throw "Unknown skill requested by ai-assets.json: '$name'." }
+        if (-not $Inventory.Skills.ContainsKey($key)) {
+            Write-Warning "Skipping skill '$name' because it was requested by ai-assets.json but is absent from the release."
+            continue
+        }
         Copy-Item -LiteralPath $Inventory.Skills[$key].FullName -Destination $skillsDestination -Recurse -Force
     }
 }
