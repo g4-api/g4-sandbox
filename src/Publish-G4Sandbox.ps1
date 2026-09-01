@@ -3151,15 +3151,27 @@ function Publish-PortableOpenCode {
     $partitionManifests = @{
         'g4-explorer' = @{
             agents = @(
-                'g4-explore-action', 'g4-explore-path-promoter', 'g4-explorer'
+                'g4-explore-action', 'g4-explore-action-attempt', 'g4-explore-action-decider',
+                'g4-explore-action-tool-discovery', 'g4-explore-action-tool-selector',
+                'g4-explore-capability-search', 'g4-explore-decision-validator', 'g4-explore-iteration',
+                'g4-explore-path-promoter', 'g4-explorer', 'g4-explore-research', 'g4-explore-scout',
+                'g4-explore-session-releaser', 'g4-explore-session-starter'
             )
             skills = @(
-                'g4-explore-decide-next-action', 'g4-explore-maintain-journal', 'g4-explore-promote-path',
-                'g4-explore-select-action-shape', 'g4-start-session-uia', 'g4-register-template',
-                'g4-visual-ground', 'g4-visual-observe',
+                'g4-explore-backtrack', 'g4-explore-bootstrap-runtime', 'g4-explore-decide-next-action',
+                'g4-explore-decision-contract', 'g4-explore-deploy-sandbox',
+                'g4-explore-evaluate-progress', 'g4-explore-ground-stage',
+                'g4-explore-maintain-iteration-log', 'g4-explore-maintain-journal',
+                'g4-explore-maintain-run-state', 'g4-explore-orchestrate-goal', 'g4-explore-promote-path',
+                'g4-explore-research-external-knowledge', 'g4-explore-run-action',
+                'g4-explore-run-attempt', 'g4-explore-run-iteration', 'g4-explore-scout-surface',
+                'g4-explore-select-action-shape', 'g4-explore-select-run', 'g4-explore-verify-promotion',
+                'g4-explore-worker-pool', 'g4-locator-finder', 'g4-register-template', 'g4-start-session',
+                'g4-start-session-uia', 'g4-visual-environment', 'g4-visual-ground', 'g4-visual-observe',
+                'g4-xpath-composer',
                 'manifest-create', 'manifest-description', 'manifest-enrichment', 'manifest-examples',
                 'manifest-final-review', 'manifest-parameters', 'manifest-pipeline', 'manifest-rag-qa',
-                'manifest-summary'
+                'manifest-summary', 'manifest-test-scripts'
             )
         }
         'g4-orchestrator' = @{
