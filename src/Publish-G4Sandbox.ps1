@@ -2402,6 +2402,146 @@ function Get-VSCode {
 }
 
 # ---------------------------------------------------------------------------
+# Function: Get-WindowsTerminal
+#
+# Purpose:
+#   Downloads the portable ("unpackaged ZIP") x64 distribution of Windows
+#   Terminal from the microsoft/terminal GitHub release and stages it as a
+#   self-contained, portable-mode installation.
+#
+# Description:
+#   - Optionally cleans the destination directory before installation
+#   - Resolves the exact 'Microsoft.WindowsTerminal_<version>_x64.zip' release
+#     asset and requires the publisher-provided SHA-256 digest (fail-closed,
+#     same contract used for OpenCode and ripgrep)
+#   - Downloads and verifies the archive, then extracts it
+#   - Flattens the extracted 'terminal-<version>' wrapper folder (when present)
+#     so that wt.exe / WindowsTerminal.exe sit directly under the destination
+#   - Enables portable mode by creating a '.portable' marker file next to
+#     WindowsTerminal.exe (settings and runtime state then live in a local
+#     'settings' folder instead of %LOCALAPPDATA%)
+#
+# Compatibility:
+#   - Windows target only (Windows Terminal is a Windows application)
+#   - Portable mode requires Windows 10 version 2004 (build 19041) or higher
+#   - The unpackaged distribution requires the Microsoft Visual C++ Desktop
+#     Runtime to be present on the host
+#
+# Assumptions:
+#   - Network access to api.github.com and github.com is available
+#   - The release publishes an 'Microsoft.WindowsTerminal_<version>_x64.zip'
+#     asset with a SHA-256 digest
+#   - Expand-Archive (built-in) can extract the .zip
+# ---------------------------------------------------------------------------
+function Get-WindowsTerminal {
+    [CmdletBinding()]
+    param (
+        # Directory used to store the downloaded archive file.
+        [string]$ArchiveDirectory,
+
+        # Destination directory where the archive will be extracted.
+        [string]$DestinationDirectory,
+
+        # When specified, removes the destination directory before extraction.
+        [Switch]$Clean
+    )
+
+    # Clean the destination directory if explicitly requested.
+    #
+    # Behavior:
+    #   - Removes the directory and all its contents
+    #   - Only executed when -Clean is specified
+    if ($Clean -and (Test-Path -Path $DestinationDirectory)) {
+
+        Write-Host "Clean installation requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
+
+        $ProgressPreference = 'SilentlyContinue'
+        Remove-Item `
+            -Path    $DestinationDirectory `
+            -Recurse `
+            -Force
+        $ProgressPreference = 'Continue'
+    }
+
+    # Ensure the destination directory exists (it may have been removed by -Clean).
+    New-Item -Path $DestinationDirectory -ItemType Directory -Force | Out-Null
+
+    # Resolve and verify the exact portable release asset.
+    #
+    # Notes:
+    #   - The '{0}' placeholder is replaced with the version parsed from the
+    #     release tag (e.g. 'v1.24.11911.0' -> '1.24.11911.0')
+    #   - Resolve-VerifiedGitHubAsset throws if the digest is missing/invalid
+    $asset = Resolve-VerifiedGitHubAsset `
+        -Repository        'microsoft/terminal' `
+        -AssetNameTemplate 'Microsoft.WindowsTerminal_{0}_x64.zip'
+
+    Write-Host "Resolved Windows Terminal release: $($asset.Tag) ($($asset.AssetName))" -ForegroundColor DarkGray
+
+    # Download the archive and validate its SHA-256 digest before use.
+    $archivePath = Receive-VerifiedGitHubAsset `
+        -Asset            $asset `
+        -ArchiveDirectory $ArchiveDirectory
+
+    # Extract the verified archive into the destination directory.
+    Write-Host "Extracting Windows Terminal archive '$($archivePath)' into: '$($DestinationDirectory)'" -ForegroundColor Cyan
+
+    Expand-PortableAgentArchive `
+        -ArchivePath     $archivePath `
+        -DestinationPath $DestinationDirectory
+
+    # Flatten the extracted folder structure.
+    #
+    # Notes:
+    #   - The x64 ZIP typically extracts into a single top-level directory
+    #     named 'terminal-<version>'
+    #   - When wt.exe is not already at the destination root, move the contents
+    #     of that single sub-directory up one level
+    $rootExecutable = Join-Path $DestinationDirectory 'wt.exe'
+
+    if (-not (Test-Path -LiteralPath $rootExecutable -PathType Leaf)) {
+
+        $topLevelDirectory = Get-ChildItem -Path $DestinationDirectory -Directory -Force |
+        Sort-Object Name |
+        Select-Object -First 1
+
+        if (-not $topLevelDirectory) {
+            Write-Warning "No extracted top-level directory was found in '$($DestinationDirectory)'"
+            return
+        }
+
+        Write-Host "Flattening extracted layout by moving contents from '$($topLevelDirectory.FullName)' to '$($DestinationDirectory)'" -ForegroundColor DarkGray
+
+        Get-ChildItem -Path $topLevelDirectory.FullName -Force | Move-Item -Destination $DestinationDirectory -Force
+
+        $ProgressPreference = 'SilentlyContinue'
+        Remove-Item -Path $topLevelDirectory.FullName -Force
+        $ProgressPreference = 'Continue'
+    }
+
+    # Verify the expected executables landed at the destination root.
+    foreach ($executableName in @('wt.exe', 'WindowsTerminal.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $DestinationDirectory $executableName) -PathType Leaf)) {
+            Write-Warning "Expected '$($executableName)' was not found under '$($DestinationDirectory)' after extraction."
+        }
+    }
+
+    # Enable portable mode.
+    #
+    # Notes:
+    #   - Creating a '.portable' marker next to WindowsTerminal.exe makes Windows
+    #     Terminal store its settings and runtime state in a local 'settings'
+    #     folder instead of %LOCALAPPDATA%, keeping the bundle self-contained
+    $portableMarker = Join-Path $DestinationDirectory '.portable'
+    Set-Content -LiteralPath $portableMarker -Value '' -Encoding ASCII -NoNewline
+
+    Write-Host "Windows Terminal deployed successfully (portable mode)." -ForegroundColor Cyan
+    Write-Host "Version:      $($asset.Tag)"           -ForegroundColor DarkGray
+    Write-Host "Destination:  $($DestinationDirectory)" -ForegroundColor DarkGray
+    Write-Host "Archive:      $($archivePath)"          -ForegroundColor DarkGray
+}
+
+# ---------------------------------------------------------------------------
 # Function: Get-VSCodeVsix
 #
 # Purpose:
@@ -3314,7 +3454,8 @@ set "OPENCODE_DISABLE_AUTOUPDATE=1"
 "%BOX_ROOT%runtime\bin\opencode.exe" %*
 exit /b %ERRORLEVEL%
 '@
-                $partitionLauncher = @'
+                # Core launcher: link the partition agents/skills into .opencode and start the boxed OpenCode.
+                $partitionRunner = @'
 @echo off
 setlocal
 set "PARTITION_ROOT=%~dp0"
@@ -3325,7 +3466,23 @@ if not exist "%PARTITION_ROOT%.opencode\skills" mklink /J "%PARTITION_ROOT%.open
 call "%PARTITION_ROOT%opencode\start.cmd" --auto %*
 exit /b %ERRORLEVEL%
 '@
+                # Entry launcher: relaunch inside the bundled Windows Terminal, then fall through to the runner.
+                # WT_SESSION is set by Windows Terminal in every shell it spawns, which guards against re-launch loops.
+                $partitionLauncher = @'
+@echo off
+setlocal
+set "PARTITION_ROOT=%~dp0"
+set "WT_EXE=%PARTITION_ROOT%..\..\..\bot-utilities\windows-terminal\wt.exe"
+if defined WT_SESSION goto run
+if not exist "%WT_EXE%" goto run
+start "" "%WT_EXE%" -w new --title "G4 OpenCode" -d "%PARTITION_ROOT%." cmd /k call "%PARTITION_ROOT%run-opencode.cmd" %*
+exit /b 0
+:run
+call "%PARTITION_ROOT%run-opencode.cmd" %*
+exit /b %ERRORLEVEL%
+'@
                 Set-Content -LiteralPath (Join-Path $boxRoot 'start.cmd') -Value $boxLauncher -Encoding ASCII
+                Set-Content -LiteralPath (Join-Path $partitionRoot 'run-opencode.cmd') -Value $partitionRunner -Encoding ASCII
                 Set-Content -LiteralPath (Join-Path $partitionRoot 'start-opencode.cmd') -Value $partitionLauncher -Encoding ASCII
             }
             else {
@@ -3652,6 +3809,19 @@ Get-VSCode `
     -ArchiveDirectory     $workDirectory `
     -DestinationDirectory (Join-Path $utilitiesDirectory "vs-code") `
     -Clean
+
+# Download the portable Windows Terminal build (Windows target only).
+#
+# Notes:
+#   - Windows Terminal is a Windows-only application; skipped for Linux/MacOs
+#   - Staged in portable mode so the bundle stays self-contained
+#   - Used by the generated start-opencode.cmd launchers to host the OpenCode TUI
+if ($OperatingSystem -eq "Windows") {
+    Get-WindowsTerminal `
+        -ArchiveDirectory     $workDirectory `
+        -DestinationDirectory (Join-Path $utilitiesDirectory "windows-terminal") `
+        -Clean
+}
 
 # Download + extract Powershell Core.
 Get-PowershellCore `
