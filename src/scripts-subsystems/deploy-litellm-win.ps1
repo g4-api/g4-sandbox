@@ -760,6 +760,10 @@ function New-PortableContext {
         CreateDatabaseSqlPath    = Join-Path $binDirectory 'create-litellm-database.sql'
         PrismaClientPyShimPath   = Join-Path $binDirectory 'prisma-client-py.cmd'
         StartCommandPath         = Join-Path $root 'start-litellm.cmd'
+        StopCommandPath          = Join-Path $root 'stop-litellm.cmd'
+        RuntimeCommonScriptPath  = Join-Path $binDirectory 'litellm-runtime-common.ps1'
+        StartRuntimeScriptPath   = Join-Path $binDirectory 'litellm-start-runtime.ps1'
+        StopRuntimeScriptPath    = Join-Path $binDirectory 'litellm-stop-runtime.ps1'
         ScriptFileName           = $scriptFileName
         RuntimeSlug              = $RuntimeSlug
         RuntimeDir               = $runtimeDirectory
@@ -1530,16 +1534,665 @@ exit /b %ERRORLEVEL%
 
     Write-BoxCommandFile -Path $Context.PrismaClientPyShimPath -Content $prismaClientPyShim
 
+    # Standalone runtime helpers (generated files, NOT this deploy script). Trimmed
+    # re-implementation of state lookup, portable context resolution, process-environment
+    # isolation, and PostgreSQL process control - no install/build logic. start-litellm.cmd and
+    # stop-litellm.cmd (below) call these directly, so the box never depends on
+    # deploy-litellm-win.ps1 being present after the deploy that built it.
+    $runtimeCommonScript = @'
+Set-StrictMode -Version Latest
+
+function Read-ActiveRuntimeState {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $statePath = Join-Path $Root 'state\active-runtime.json'
+
+    if (-not (Test-Path -LiteralPath $statePath)) {
+        return $null
+    }
+
+    try {
+        $parsed = (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json)
+    }
+    catch {
+        return $null
+    }
+
+    foreach ($field in @('active', 'previous', 'history')) {
+        if (-not $parsed.PSObject.Properties[$field]) {
+            Add-Member -InputObject $parsed -NotePropertyName $field -NotePropertyValue $null -Force
+        }
+    }
+
+    return $parsed
+}
+
+function Get-ActiveRuntimeSlug {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter()]
+        [switch]$AllowMissing
+    )
+
+    $state = Read-ActiveRuntimeState -Root $Root
+
+    if ($null -ne $state -and -not [string]::IsNullOrWhiteSpace($state.active)) {
+        return [string]$state.active
+    }
+
+    if ($AllowMissing) {
+        return $null
+    }
+
+    throw [System.InvalidOperationException]::new('No active runtime found. Deploy the box first with deploy-litellm-win.ps1 -Action Deploy.')
+}
+
+function New-PortableRuntimeContext {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter()]
+        [AllowNull()]
+        [string]$RuntimeSlug,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PostgresHostAddress,
+
+        [Parameter(Mandatory = $true)]
+        [int]$PostgresPort,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PostgresDatabase,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PostgresUser,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PostgresPassword,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LiteLLMHostAddress,
+
+        [Parameter(Mandatory = $true)]
+        [int]$LiteLLMPort,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LiteLLMMasterKey,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$StoreModelInDb
+    )
+
+    $cacheDirectory = Join-Path $Root 'cache'
+    $binDirectory = Join-Path $Root 'bin'
+
+    $encodedPassword = [System.Uri]::EscapeDataString($PostgresPassword)
+    $databaseUrl = "postgresql://$PostgresUser`:$encodedPassword@$PostgresHostAddress`:$PostgresPort/$PostgresDatabase"
+
+    $runtimeDirectory = $null
+    $pythonInstallDirectory = $null
+    $packagesDirectory = $null
+    $prismaCacheDirectory = $null
+    $manifest = $null
+
+    if (-not [string]::IsNullOrWhiteSpace($RuntimeSlug)) {
+        $runtimeDirectory = Join-Path $Root (Join-Path 'runtimes' $RuntimeSlug)
+        $pythonInstallDirectory = Join-Path $runtimeDirectory 'python'
+        $packagesDirectory = Join-Path $runtimeDirectory 'packages'
+        $prismaCacheDirectory = Join-Path $runtimeDirectory 'prisma'
+
+        $manifestPath = Join-Path $runtimeDirectory 'manifest.json'
+        if (Test-Path -LiteralPath $manifestPath) {
+            try {
+                $manifest = (Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json)
+            }
+            catch {
+                $manifest = $null
+            }
+        }
+    }
+
+    $prismaCliVersion = $null
+    $prismaEngineVersion = $null
+
+    if ($null -ne $manifest) {
+        if ($manifest.PSObject.Properties['prismaCli'])    { $prismaCliVersion = [string]$manifest.prismaCli }
+        if ($manifest.PSObject.Properties['prismaEngine']) { $prismaEngineVersion = [string]$manifest.prismaEngine }
+    }
+
+    return [pscustomobject]@{
+        Root                  = $Root
+        HomeDir               = Join-Path $Root 'home'
+        DataDir               = Join-Path $Root 'data'
+        DataRoamingDir        = Join-Path $Root 'data\roaming'
+        DataLocalDir          = Join-Path $Root 'data\local'
+        CacheDir              = $cacheDirectory
+        StateDir              = Join-Path $Root 'state'
+        TempDir               = Join-Path $Root 'temp'
+        BinDir                = $binDirectory
+        PgHome                = Join-Path $Root 'postgresql'
+        PgBin                 = Join-Path $Root 'postgresql\bin'
+        PgData                = Join-Path $Root 'data\postgresql'
+        PostgresLogPath       = Join-Path $Root 'data\postgresql.log'
+        ConfigPath            = Join-Path $Root 'state\config.yaml'
+        LiteLLMBootstrapPath  = Join-Path $binDirectory 'litellm-portable.py'
+        RuntimeSlug           = $RuntimeSlug
+        RuntimeDir            = $runtimeDirectory
+        PythonInstallDir      = $pythonInstallDirectory
+        PackagesDir           = $packagesDirectory
+        PrismaCacheDir        = $prismaCacheDirectory
+        PrismaBinaryCacheDir  = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'binaries' } else { $null })
+        PrismaNodeenvCacheDir = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'nodeenv' } else { $null })
+        PrismaNpmCacheDir     = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'npm' } else { $null })
+        PrismaCliPath         = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'binaries\node_modules\.bin\prisma.cmd' } else { $null })
+        PrismaNodeExe         = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'nodeenv\Scripts\node.exe' } else { $null })
+        PrismaCliIndexJs      = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'binaries\node_modules\prisma\build\index.js' } else { $null })
+        PostgresHostAddress   = $PostgresHostAddress
+        PostgresPort          = $PostgresPort
+        PostgresDatabase      = $PostgresDatabase
+        PostgresUser          = $PostgresUser
+        PostgresPassword      = $PostgresPassword
+        LiteLLMHostAddress    = $LiteLLMHostAddress
+        LiteLLMPort           = $LiteLLMPort
+        LiteLLMMasterKey      = $LiteLLMMasterKey
+        StoreModelInDb        = $StoreModelInDb
+        DatabaseUrl           = $databaseUrl
+        PrismaCliVersion      = $prismaCliVersion
+        PrismaEngineVersion   = $prismaEngineVersion
+    }
+}
+
+function Get-PortablePythonExe {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context,
+
+        [Parameter()]
+        [switch]$AllowMissing
+    )
+
+    $candidates = @()
+
+    if ($null -ne $Context.PythonInstallDir -and (Test-Path -LiteralPath $Context.PythonInstallDir)) {
+        $candidates = @(
+            Get-ChildItem -LiteralPath $Context.PythonInstallDir -Directory -Filter 'cpython-*' -ErrorAction SilentlyContinue |
+                ForEach-Object { Join-Path $_.FullName 'python.exe' } |
+                Where-Object { Test-Path -LiteralPath $_ }
+        )
+    }
+
+    if ($candidates.Count -eq 0) {
+        if ($AllowMissing) {
+            return $null
+        }
+
+        throw [System.IO.FileNotFoundException]::new("Portable Python not found for runtime '$($Context.RuntimeSlug)'.")
+    }
+
+    return (@($candidates | Sort-Object))[-1]
+}
+
+function Set-PortableRuntimeEnvironment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $env:HOME = $Context.HomeDir
+    $env:USERPROFILE = $Context.HomeDir
+    $env:APPDATA = $Context.DataRoamingDir
+    $env:LOCALAPPDATA = $Context.DataLocalDir
+    $env:TEMP = $Context.TempDir
+    $env:TMP = $Context.TempDir
+
+    $env:XDG_CONFIG_HOME = $Context.StateDir
+    $env:XDG_DATA_HOME = $Context.DataDir
+    $env:XDG_STATE_HOME = $Context.StateDir
+    $env:XDG_CACHE_HOME = $Context.CacheDir
+
+    $env:PYTHONNOUSERSITE = '1'
+    $env:PYTHONUTF8 = '1'
+    $env:PYTHONIOENCODING = 'utf-8'
+
+    $env:PG_HOME = $Context.PgHome
+    $env:PG_BIN = $Context.PgBin
+    $env:PG_DATA = $Context.PgData
+    $env:PGHOST = $Context.PostgresHostAddress
+    $env:PGPORT = [string]$Context.PostgresPort
+
+    $env:DATABASE_URL = $Context.DatabaseUrl
+
+    $env:LITELLM_HOST = $Context.LiteLLMHostAddress
+    $env:LITELLM_PORT = [string]$Context.LiteLLMPort
+    $env:LITELLM_MASTER_KEY = $Context.LiteLLMMasterKey
+    $env:LITELLM_DISABLE_NO_REDIS_WARNING = 'true'
+
+    if ($Context.StoreModelInDb) {
+        $env:STORE_MODEL_IN_DB = 'True'
+    }
+
+    $env:PRISMA_HOME_DIR = $Context.HomeDir
+    $env:PRISMA_USE_GLOBAL_NODE = 'False'
+    $env:PRISMA_USE_NODEJS_BIN = 'False'
+    $env:PRISMA_OFFLINE_MODE = 'true'
+    $env:PRISMA_HEALTH_WATCHDOG_ENABLED = 'false'
+
+    if ($null -ne $Context.RuntimeDir) {
+        $env:PYTHONPATH = $Context.PackagesDir
+        $env:PRISMA_BINARY_CACHE_DIR = $Context.PrismaBinaryCacheDir
+        $env:PRISMA_NODEENV_CACHE_DIR = $Context.PrismaNodeenvCacheDir
+        $env:PRISMA_CLI_PATH = $Context.PrismaCliPath
+        $env:NPM_CONFIG_CACHE = $Context.PrismaNpmCacheDir
+        $env:PORTABLE_PRISMA_NODE = $Context.PrismaNodeExe
+        $env:PORTABLE_PRISMA_JS = $Context.PrismaCliIndexJs
+
+        $pythonExe = Get-PortablePythonExe -Context $Context -AllowMissing
+        if ($null -ne $pythonExe) {
+            $env:PORTABLE_PYTHON_EXE = $pythonExe
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($Context.PrismaCliVersion)) {
+            $env:PRISMA_VERSION = $Context.PrismaCliVersion
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Context.PrismaEngineVersion)) {
+            $env:PRISMA_EXPECTED_ENGINE_VERSION = $Context.PrismaEngineVersion
+        }
+    }
+
+    $isolatedPathEntries = @(
+        $Context.BinDir,
+        $Context.PgBin,
+        (Join-Path $env:SystemRoot 'System32'),
+        $env:SystemRoot,
+        (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0')
+    )
+
+    $env:PATH = $isolatedPathEntries -join ';'
+}
+
+function Invoke-NativeCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [Parameter()]
+        [string[]]$ArgumentList = @(),
+
+        [Parameter()]
+        [int[]]$SuccessExitCode = @(0),
+
+        [Parameter()]
+        [switch]$PassThruExitCode
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        throw [System.IO.FileNotFoundException]::new("Executable not found: $FilePath")
+    }
+
+    & $FilePath @ArgumentList | Out-Host
+    $observedExitCode = $LASTEXITCODE
+
+    if ($PassThruExitCode) {
+        return $observedExitCode
+    }
+
+    if ($SuccessExitCode -notcontains $observedExitCode) {
+        $fileName = [System.IO.Path]::GetFileName($FilePath)
+        throw [System.InvalidOperationException]::new("Native command '$fileName' failed with exit code $observedExitCode.")
+    }
+}
+
+function Test-PostgresReady {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $pgIsReadyExe = Join-Path $Context.PgBin 'pg_isready.exe'
+
+    if (-not (Test-Path -LiteralPath $pgIsReadyExe)) {
+        return $false
+    }
+
+    $exitCode = Invoke-NativeCommand -FilePath $pgIsReadyExe -ArgumentList @(
+        '-h', $Context.PostgresHostAddress, '-p', [string]$Context.PostgresPort, '-q') -PassThruExitCode
+
+    return $exitCode -eq 0
+}
+
+function Invoke-PgCtl {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList,
+
+        [Parameter()]
+        [int]$TimeoutSeconds = 120
+    )
+
+    $pgCtlExe = Join-Path $Context.PgBin 'pg_ctl.exe'
+
+    if (-not (Test-Path -LiteralPath $pgCtlExe)) {
+        throw [System.IO.FileNotFoundException]::new("Executable not found: $pgCtlExe")
+    }
+
+    $stdoutPath = Join-Path $Context.TempDir ('pg_ctl-out-' + [System.Guid]::NewGuid().ToString('N') + '.log')
+    $stderrPath = Join-Path $Context.TempDir ('pg_ctl-err-' + [System.Guid]::NewGuid().ToString('N') + '.log')
+
+    $startParameters = @{
+        FilePath               = $pgCtlExe
+        ArgumentList           = $ArgumentList
+        NoNewWindow            = $true
+        PassThru               = $true
+        RedirectStandardOutput = $stdoutPath
+        RedirectStandardError  = $stderrPath
+    }
+
+    try {
+        $pgCtlProcess = Start-Process @startParameters
+        $null = $pgCtlProcess.Handle
+        $exitedInTime = $pgCtlProcess.WaitForExit($TimeoutSeconds * 1000)
+
+        foreach ($outputPath in @($stdoutPath, $stderrPath)) {
+            if (Test-Path -LiteralPath $outputPath) {
+                $outputText = (Get-Content -LiteralPath $outputPath -Raw)
+                if (-not [string]::IsNullOrWhiteSpace($outputText)) {
+                    Write-Host $outputText.Trim()
+                }
+            }
+        }
+
+        if (-not $exitedInTime) {
+            try {
+                $pgCtlProcess.Kill()
+            }
+            catch {
+                Write-Warning 'pg_ctl did not exit and could not be terminated.'
+            }
+
+            throw [System.TimeoutException]::new("pg_ctl did not finish within $TimeoutSeconds seconds.")
+        }
+
+        if ($pgCtlProcess.ExitCode -ne 0) {
+            throw [System.InvalidOperationException]::new("pg_ctl failed with exit code $($pgCtlProcess.ExitCode).")
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction Ignore
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction Ignore
+    }
+}
+
+function Get-PostgresLogTail {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    if (-not (Test-Path -LiteralPath $Context.PostgresLogPath)) {
+        return ''
+    }
+
+    $tailLines = @(Get-Content -LiteralPath $Context.PostgresLogPath -Tail 15)
+    return "Last PostgreSQL log lines:`n" + ($tailLines -join "`n")
+}
+
+function Start-PortablePostgres {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $pgVersionMarker = Join-Path $Context.PgData 'PG_VERSION'
+
+    if (-not (Test-Path -LiteralPath $pgVersionMarker)) {
+        throw [System.InvalidOperationException]::new("PostgreSQL data cluster is not initialized: $($Context.PgData)")
+    }
+
+    if (Test-PostgresReady -Context $Context) {
+        Write-Host "[OK] PostgreSQL is already accepting connections on $($Context.PostgresHostAddress):$($Context.PostgresPort)."
+        return
+    }
+
+    Invoke-PgCtl -Context $Context -ArgumentList @('start', '-D', $Context.PgData, '-l', $Context.PostgresLogPath, '-w') -TimeoutSeconds 120
+
+    if (-not (Test-PostgresReady -Context $Context)) {
+        $logTail = Get-PostgresLogTail -Context $Context
+        $message = 'PostgreSQL did not begin accepting connections after start.'
+        if ($logTail) {
+            $message = $message + "`n" + $logTail
+        }
+        throw [System.InvalidOperationException]::new($message)
+    }
+
+    Write-Host "[OK] PostgreSQL is accepting connections on $($Context.PostgresHostAddress):$($Context.PostgresPort)."
+}
+
+function Stop-PortablePostgres {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $pgVersionMarker = Join-Path $Context.PgData 'PG_VERSION'
+    $pgCtlExe = Join-Path $Context.PgBin 'pg_ctl.exe'
+
+    if (-not (Test-Path -LiteralPath $pgVersionMarker) -or -not (Test-Path -LiteralPath $pgCtlExe)) {
+        Write-Host '[OK] No portable PostgreSQL cluster to stop.'
+        return [pscustomobject]@{ Action = 'Stop'; PostgresStopped = $false }
+    }
+
+    if (-not (Test-PostgresReady -Context $Context)) {
+        Write-Host '[OK] PostgreSQL is not running.'
+        return [pscustomobject]@{ Action = 'Stop'; PostgresStopped = $false }
+    }
+
+    Invoke-PgCtl -Context $Context -ArgumentList @('stop', '-D', $Context.PgData, '-w', '-m', 'fast') -TimeoutSeconds 60
+    Write-Host '[OK] PostgreSQL stopped.'
+    return [pscustomobject]@{ Action = 'Stop'; PostgresStopped = $true }
+}
+
+function Start-LiteLLMProxy {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context,
+
+        [Parameter()]
+        [string[]]$ProxyArgument
+    )
+
+    $pythonExe = Get-PortablePythonExe -Context $Context
+    $env:PORTABLE_PYTHON_EXE = $pythonExe
+
+    $pgVersionMarker = Join-Path $Context.PgData 'PG_VERSION'
+    if (-not (Test-Path -LiteralPath $pgVersionMarker)) {
+        throw [System.InvalidOperationException]::new('PostgreSQL data cluster is not initialized. Run -Action Deploy first.')
+    }
+
+    if (-not (Test-Path -LiteralPath $Context.ConfigPath)) {
+        throw [System.IO.FileNotFoundException]::new("Config missing: $($Context.ConfigPath). Run -Action Deploy first.")
+    }
+
+    if (-not (Test-PostgresReady -Context $Context)) {
+        Start-PortablePostgres -Context $Context
+    }
+
+    $argumentList = @(
+        $Context.LiteLLMBootstrapPath,
+        '--config', $Context.ConfigPath,
+        '--host', $Context.LiteLLMHostAddress,
+        '--port', [string]$Context.LiteLLMPort
+    )
+
+    if ($ProxyArgument) {
+        $argumentList += $ProxyArgument
+    }
+
+    Write-Host "[RUN] LiteLLM proxy ($($Context.RuntimeSlug)) on http://$($Context.LiteLLMHostAddress):$($Context.LiteLLMPort)"
+    & $pythonExe @argumentList | Out-Host
+    $proxyExitCode = $LASTEXITCODE
+
+    return [pscustomobject]@{ Action = 'Start'; ExitCode = $proxyExitCode; Root = $Context.Root; Runtime = $Context.RuntimeSlug }
+}
+'@
+
+    Write-BoxTextFile -Path $Context.RuntimeCommonScriptPath -Content $runtimeCommonScript
+
+    $startRuntimeScript = @'
+[CmdletBinding()]
+param(
+    [Parameter()] [string]$ContainerRoot,
+    [Parameter()] [string]$PostgresHostAddress = '127.0.0.1',
+    [Parameter()] [int]$PostgresPort = 54321,
+    [Parameter()] [string]$PostgresDatabase = 'litellm',
+    [Parameter()] [string]$PostgresUser = 'litellm',
+    [Parameter()] [string]$PostgresPassword = 'litellm-local',
+    [Parameter()] [string]$LiteLLMHostAddress = '127.0.0.1',
+    [Parameter()] [int]$LiteLLMPort = 4000,
+    [Parameter()] [string]$LiteLLMMasterKey = 'sk-1234',
+    [Parameter()] [bool]$StoreModelInDb = $true,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$LiteLLMArgument
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'litellm-runtime-common.ps1')
+
+if ([string]::IsNullOrWhiteSpace($ContainerRoot)) {
+    $anchor = $PSScriptRoot
+    if ([string]::IsNullOrWhiteSpace($anchor) -and -not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        $anchor = Split-Path -Parent $PSCommandPath
+    }
+    if ([string]::IsNullOrWhiteSpace($anchor)) {
+        throw [System.ArgumentException]::new('Could not determine the box directory. Pass -ContainerRoot explicitly.')
+    }
+    $ContainerRoot = Split-Path -Parent $anchor
+}
+
+$root = [System.IO.Path]::GetFullPath($ContainerRoot)
+
+if (-not (Test-Path -LiteralPath $root)) {
+    throw [System.IO.DirectoryNotFoundException]::new("Container root does not exist: $root")
+}
+
+$slug = Get-ActiveRuntimeSlug -Root $root
+$context = New-PortableRuntimeContext -Root $root -RuntimeSlug $slug `
+    -PostgresHostAddress $PostgresHostAddress -PostgresPort $PostgresPort `
+    -PostgresDatabase $PostgresDatabase -PostgresUser $PostgresUser -PostgresPassword $PostgresPassword `
+    -LiteLLMHostAddress $LiteLLMHostAddress -LiteLLMPort $LiteLLMPort -LiteLLMMasterKey $LiteLLMMasterKey `
+    -StoreModelInDb $StoreModelInDb
+
+Set-PortableRuntimeEnvironment -Context $context
+
+$result = Start-LiteLLMProxy -Context $context -ProxyArgument $LiteLLMArgument
+
+if ($null -ne $result -and $result.PSObject.Properties['ExitCode']) {
+    exit [int]$result.ExitCode
+}
+
+exit 0
+'@
+
+    Write-BoxTextFile -Path $Context.StartRuntimeScriptPath -Content $startRuntimeScript
+
+    $stopRuntimeScript = @'
+[CmdletBinding()]
+param(
+    [Parameter()] [string]$ContainerRoot,
+    [Parameter()] [string]$PostgresHostAddress = '127.0.0.1',
+    [Parameter()] [int]$PostgresPort = 54321,
+    [Parameter()] [string]$PostgresDatabase = 'litellm',
+    [Parameter()] [string]$PostgresUser = 'litellm',
+    [Parameter()] [string]$PostgresPassword = 'litellm-local',
+    [Parameter()] [string]$LiteLLMHostAddress = '127.0.0.1',
+    [Parameter()] [int]$LiteLLMPort = 4000,
+    [Parameter()] [string]$LiteLLMMasterKey = 'sk-1234',
+    [Parameter()] [bool]$StoreModelInDb = $true
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'litellm-runtime-common.ps1')
+
+if ([string]::IsNullOrWhiteSpace($ContainerRoot)) {
+    $anchor = $PSScriptRoot
+    if ([string]::IsNullOrWhiteSpace($anchor) -and -not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        $anchor = Split-Path -Parent $PSCommandPath
+    }
+    if ([string]::IsNullOrWhiteSpace($anchor)) {
+        throw [System.ArgumentException]::new('Could not determine the box directory. Pass -ContainerRoot explicitly.')
+    }
+    $ContainerRoot = Split-Path -Parent $anchor
+}
+
+$root = [System.IO.Path]::GetFullPath($ContainerRoot)
+
+if (-not (Test-Path -LiteralPath $root)) {
+    throw [System.IO.DirectoryNotFoundException]::new("Container root does not exist: $root")
+}
+
+$slug = Get-ActiveRuntimeSlug -Root $root -AllowMissing
+$context = New-PortableRuntimeContext -Root $root -RuntimeSlug $slug `
+    -PostgresHostAddress $PostgresHostAddress -PostgresPort $PostgresPort `
+    -PostgresDatabase $PostgresDatabase -PostgresUser $PostgresUser -PostgresPassword $PostgresPassword `
+    -LiteLLMHostAddress $LiteLLMHostAddress -LiteLLMPort $LiteLLMPort -LiteLLMMasterKey $LiteLLMMasterKey `
+    -StoreModelInDb $StoreModelInDb
+
+Set-PortableRuntimeEnvironment -Context $context
+
+Stop-PortablePostgres -Context $context
+'@
+
+    Write-BoxTextFile -Path $Context.StopRuntimeScriptPath -Content $stopRuntimeScript
+
     $startCommandTemplate = @'
 @echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0__SCRIPT__" -Action Start %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0bin\litellm-start-runtime.ps1" %*
 exit /b %ERRORLEVEL%
 '@
 
-    $startCommand = $startCommandTemplate.Replace('__SCRIPT__', $Context.ScriptFileName)
-    Write-BoxCommandFile -Path $Context.StartCommandPath -Content $startCommand
+    Write-BoxCommandFile -Path $Context.StartCommandPath -Content $startCommandTemplate
 
-    Write-Host '[OK] Portable helper files and start-litellm.cmd created.'
+    $stopCommandTemplate = @'
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0bin\litellm-stop-runtime.ps1" %*
+exit /b %ERRORLEVEL%
+'@
+
+    Write-BoxCommandFile -Path $Context.StopCommandPath -Content $stopCommandTemplate
+
+    Write-Host '[OK] Portable helper files, start-litellm.cmd and stop-litellm.cmd created.'
 }
 
 function Initialize-Config {
@@ -2611,6 +3264,7 @@ function Invoke-PortableDeployment {
         }
         Remove-Item -LiteralPath $Context.UvExe -Force -ErrorAction Ignore
         Remove-Item -LiteralPath $Context.StartCommandPath -Force -ErrorAction Ignore
+        Remove-Item -LiteralPath $Context.StopCommandPath -Force -ErrorAction Ignore
     }
     elseif (Test-Path -LiteralPath $Context.DeployCompleteMarkerPath) {
         Write-Host ''
