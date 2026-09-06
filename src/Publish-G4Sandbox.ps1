@@ -79,7 +79,15 @@ param(
     # Behavior:
     #   - Downstream steps may remove existing directories
     #   - Ensures deterministic build output
-    [switch]$Clean
+    [switch]$Clean,
+
+    # When specified, skips the portable LiteLLM subsystem deployment.
+    #
+    # Notes:
+    #   - The sandbox is published without the 'litellm' box
+    #   - start-litellm.cmd / start-litellm.sh remain in the sandbox root but
+    #     will report that the subsystem is missing
+    [switch]$SkipLiteLLM
 )
 
 # Enable strict mode for safer scripting.
@@ -3258,6 +3266,106 @@ function Copy-SelectedG4AiAssets {
     }
 }
 
+function Publish-PortableLiteLLM {
+    <#
+    .SYNOPSIS
+        Deploys the portable LiteLLM subsystem into the staged sandbox.
+
+    .DESCRIPTION
+        Selects the operating-system specific deployment script from
+        'scripts-subsystems' and executes it against '<stage>\litellm', so the
+        published sandbox ships with a fully installed, self-contained LiteLLM
+        proxy stack (uv, CPython, LiteLLM packages, Prisma toolchain and a
+        portable PostgreSQL cluster).
+
+        Dispatch rules:
+          - Windows -> deploy-litellm-win.ps1
+          - Linux   -> deploy-litellm-linux.ps1
+          - Anything else (for example MacOs) -> skipped with a warning
+
+        After a successful deployment the portable PostgreSQL server is stopped
+        ('-Action Stop'), because the deployment leaves it running detached and
+        the box must not be relocated while the server is up.
+
+    .NOTES
+        - The deployment scripts are build-time tooling only; they are not
+          copied into the published sandbox.
+        - Failures are non-fatal: a warning is emitted and the publish continues
+          without the LiteLLM subsystem.
+    #>
+    [CmdletBinding()]
+    param(
+        # Target operating system that selects the deployment script.
+        [Parameter(Mandatory = $true)]
+        [string]$OperatingSystem,
+
+        # Directory that contains deploy-litellm-win.ps1 / deploy-litellm-linux.ps1.
+        [Parameter(Mandatory = $true)]
+        [string]$SubsystemsDirectory,
+
+        # Sandbox stage root; the LiteLLM box is created under '<stage>\litellm'.
+        [Parameter(Mandatory = $true)]
+        [string]$StageDirectory
+    )
+
+    # Resolve the deployment script for the requested target platform.
+    $deployScriptName = switch ($OperatingSystem.ToLowerInvariant()) {
+        'windows' { 'deploy-litellm-win.ps1' }
+        'linux'   { 'deploy-litellm-linux.ps1' }
+        default   { $null }
+    }
+
+    # Unsupported platforms (for example MacOs) are skipped, not failed.
+    if ([string]::IsNullOrWhiteSpace($deployScriptName)) {
+        Write-Warning "LiteLLM subsystem: unsupported operating system '$($OperatingSystem)'. Skipping deployment."
+        return
+    }
+
+    $deployScriptPath = Join-Path $SubsystemsDirectory $deployScriptName
+
+    # The deployment scripts are part of the repository; a missing file is a
+    # packaging problem, but must not abort an otherwise valid publish.
+    if (-not (Test-Path -LiteralPath $deployScriptPath)) {
+        Write-Warning "LiteLLM subsystem: deployment script '$($deployScriptPath)' was not found. Skipping deployment."
+        return
+    }
+
+    # The LiteLLM box lives in the sandbox root so the generated
+    # start-litellm.cmd / start-litellm.sh sit beside the root launchers.
+    $containerRoot = Join-Path $StageDirectory 'litellm'
+    New-Item -ItemType Directory -Path $containerRoot -Force | Out-Null
+
+    Write-Host "Deploying the portable LiteLLM subsystem into '$($containerRoot)'..." -ForegroundColor DarkGray
+
+    # The deployment scripts are standalone programs with their own error
+    # handling and are not written against StrictMode 'Latest'. Relax both
+    # settings for the duration of the call; because Set-StrictMode and the
+    # preference variable are scoped to this function, the caller's settings
+    # are restored automatically when the function returns.
+    Set-StrictMode -Off
+    $ErrorActionPreference = 'Continue'
+
+    try {
+        # Build the box (downloads uv, CPython, LiteLLM, Prisma and PostgreSQL,
+        # initializes the database and verifies the runtime).
+        & $deployScriptPath -Action Deploy -ContainerRoot $containerRoot
+
+        if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+            throw [System.InvalidOperationException]::new(
+                "'$($deployScriptName)' exited with code $($LASTEXITCODE).")
+        }
+
+        # Stop the detached PostgreSQL server so the staged box can safely be
+        # copied to the final sandbox location.
+        & $deployScriptPath -Action Stop -ContainerRoot $containerRoot
+
+        Write-Host "LiteLLM subsystem deployed successfully." -ForegroundColor Green
+    }
+    catch {
+        Write-Warning "LiteLLM subsystem deployment failed: $($_.Exception.Message). Continuing without LiteLLM."
+    }
+}
+
 function Publish-PortableOpenCode {
     [CmdletBinding()]
     param(
@@ -4045,6 +4153,24 @@ if ($nodejsDependencies -and $nodejsDependencies.Count -gt 0) {
             }
         }
     }
+}
+
+# Deploy the portable LiteLLM subsystem into the stage.
+#
+# Notes:
+#   - Runs after every download and after the sandbox file copies, so the box
+#     is the last thing added before the stage is copied into the sandbox.
+#   - Windows and Linux targets each get their own deployment script; any other
+#     platform is skipped as unsupported.
+#   - Failures are non-fatal and only warn.
+if ($SkipLiteLLM) {
+    Write-Host "Skipping the LiteLLM subsystem deployment (-SkipLiteLLM)." -ForegroundColor DarkGray
+}
+else {
+    Publish-PortableLiteLLM `
+        -OperatingSystem      $OperatingSystem `
+        -SubsystemsDirectory  (Join-Path $sourceDirectory "scripts-subsystems") `
+        -StageDirectory       $stageDirectory
 }
 
 # Remove existing sandbox directory if requested.
