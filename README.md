@@ -11,6 +11,7 @@ A fully portable sandbox builder for the **G4™ automation ecosystem**.
 * [Quick Start](#-quick-start)
 * [PowerShell Installation (macOS/Linux)](#-powershell-installation-macoslinux)
 * [Usage](#usage)
+* [LiteLLM Subsystem](#-litellm-subsystem)
 * [Output](#-output)
 * [Compatibility Notes](#compatibility-notes)
 * [License](#-license)
@@ -64,6 +65,7 @@ The produced sandbox is self-contained and ready to run.
 * Clean rebuild support
 * Chrome for Testing integration
 * G4 tools staging
+* Portable LiteLLM proxy subsystem
 
 ---
 
@@ -177,6 +179,64 @@ pwsh ./Publish-G4Sandbox.ps1 [parameters]
 | `OperatingSystem` | Target OS (Windows/Linux/MacOs)  |
 | `OutputDirectory` | Final sandbox location           |
 | `Clean`           | Force clean rebuild              |
+| `SkipLiteLLM`     | Skip the LiteLLM subsystem build |
+
+---
+
+## 🧠 LiteLLM Subsystem
+
+The builder deploys a **fully portable LiteLLM proxy stack** into the sandbox, so the published bundle ships with LiteLLM already installed. Nothing is installed globally and no machine, user, registry, or profile state is changed.
+
+### How it is built
+
+The deployment scripts live under `src/scripts-subsystems/` and are **build-time tooling only** — they are not copied into the published sandbox. `Publish-G4Sandbox.ps1` selects one based on the `OperatingSystem` parameter:
+
+| Target OS | Deployment script          |
+| --------- | -------------------------- |
+| `Windows` | `deploy-litellm-win.ps1`   |
+| `Linux`   | `deploy-litellm-linux.ps1` |
+| `MacOs`   | Not supported — skipped    |
+
+The subsystem is deployed after all other downloads and staging steps, immediately before the stage is copied into the final sandbox directory. The portable PostgreSQL server is stopped once the deployment completes, so the bundle can safely be moved or archived.
+
+If the deployment fails (for example, due to a network error), a warning is emitted and the publish continues **without** the LiteLLM subsystem. Use `-SkipLiteLLM` to skip the step entirely.
+
+### Layout and usage
+
+The box is created at the sandbox root as `litellm/`, and a launcher is placed beside it in the sandbox root:
+
+```text
+<sandbox>/
+  litellm/                  the portable LiteLLM box (runtimes, data, state, cache)
+  start-litellm.cmd         Windows launcher (forwards to litellm/start-litellm.cmd)
+  start-litellm.sh          Linux launcher   (forwards to litellm/start-litellm.sh)
+```
+
+Start the proxy from the sandbox root:
+
+```powershell
+# Windows
+.\start-litellm.cmd
+```
+
+```bash
+# Linux
+./start-litellm.sh
+```
+
+### Defaults
+
+| Setting             | Default                     |
+| ------------------- | --------------------------- |
+| LiteLLM endpoint    | `127.0.0.1:4000`            |
+| LiteLLM master key  | `sk-1234`                   |
+| PostgreSQL endpoint | `127.0.0.1:54321`           |
+| Upstream API base   | `http://127.0.0.1:8000/v1`  |
+| Upstream model      | `Qwen/Qwen3-0.6B`           |
+
+The proxy configuration is created once at `litellm/state/config.yaml` and is never overwritten afterwards, so hand-edited `model_list` entries survive. Models can also be managed from the admin UI, because `STORE_MODEL_IN_DB` is enabled by default.
+
+> **Note:** The upstream inference server is **not** deployed. The default configuration expects an OpenAI-compatible endpoint to be reachable at `http://127.0.0.1:8000/v1`.
 
 ---
 
@@ -200,6 +260,8 @@ The output directory will contain all required runtime assets.
 * Requires outbound network access during build
 * `tar` must be available for certain extractions
 * Helper functions must be loaded in scope
+* The LiteLLM subsystem is built for `Windows` and `Linux` targets only; `MacOs` targets skip it
+* Building the LiteLLM subsystem executes the downloaded toolchain, so the build host must match the target platform (use `-SkipLiteLLM` for cross-platform builds)
 
 ---
 
