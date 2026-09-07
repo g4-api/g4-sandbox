@@ -840,7 +840,10 @@ function Set-PortableProcessEnvironment {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [pscustomobject]$Context
+        [pscustomobject]$Context,
+
+        [Parameter()]
+        [switch]$RuntimeMode
     )
 
     # Stage: state mutation. All changes are process-local.
@@ -905,8 +908,20 @@ function Set-PortableProcessEnvironment {
         $env:PRISMA_BINARY_CACHE_DIR = $Context.PrismaBinaryCacheDir
         $env:PRISMA_NODEENV_CACHE_DIR = $Context.PrismaNodeenvCacheDir
         $env:PRISMA_CLI_PATH = $Context.PrismaCliPath
-        $env:PRISMA_QUERY_ENGINE_BINARY = $Context.PrismaQueryEnginePath
         $env:NPM_CONFIG_CACHE = $Context.PrismaNpmCacheDir
+
+        # Build-time Prisma must be allowed to download its normal engine. Runtime consumers use
+        # only the portable copy, after Install-PrismaToolchain has created and verified it.
+        if ($RuntimeMode) {
+            if (-not (Test-Path -LiteralPath $Context.PrismaQueryEnginePath -PathType Leaf)) {
+                throw [System.IO.FileNotFoundException]::new(
+                    "Portable Prisma query engine missing: $($Context.PrismaQueryEnginePath)")
+            }
+            $env:PRISMA_QUERY_ENGINE_BINARY = $Context.PrismaQueryEnginePath
+        }
+        else {
+            Remove-Item Env:PRISMA_QUERY_ENGINE_BINARY -ErrorAction SilentlyContinue
+        }
 
         # Consumed by the generated helper files so they stay version-agnostic.
         $env:PORTABLE_PRISMA_NODE = $Context.PrismaNodeExe
@@ -2650,7 +2665,12 @@ function Install-PrismaToolchain {
     # Stage: network fetch. Prisma reuses the nodeenv above and installs the pinned CLI + engines.
     $env:PRISMA_OFFLINE_MODE = 'false'
     try {
-        Invoke-NativeCommand -FilePath $pythonExe -ArgumentList @('-m', 'prisma', 'py', 'fetch')
+        $fetchArguments = @('-m', 'prisma', 'py', 'fetch')
+        if ($hasPrismaCli -and -not $hasQueryEngine) {
+            # Recover a partial fetch whose CLI entrypoint exists but whose engine install failed.
+            $fetchArguments += '--force'
+        }
+        Invoke-NativeCommand -FilePath $pythonExe -ArgumentList $fetchArguments
     }
     finally {
         $env:PRISMA_OFFLINE_MODE = 'true'
@@ -3441,6 +3461,7 @@ function Invoke-PortableDeployment {
 
     Write-StageBanner -Name "Build runtime $($Context.RuntimeSlug)"
     Invoke-RuntimeBuild -Context $Context
+    Set-PortableProcessEnvironment -Context $Context -RuntimeMode
 
     Write-StageBanner -Name 'Initialize PostgreSQL cluster'
     Initialize-PostgresCluster -Context $Context
@@ -3536,6 +3557,7 @@ function Invoke-RuntimeUpdate {
 
     Write-StageBanner -Name "Build runtime $($Context.RuntimeSlug)"
     Invoke-RuntimeBuild -Context $Context
+    Set-PortableProcessEnvironment -Context $Context -RuntimeMode
 
     Write-StageBanner -Name 'Ensure PostgreSQL running'
     if (-not (Test-PostgresReady -Context $Context)) {
@@ -3599,7 +3621,7 @@ function Invoke-RuntimeRollback {
     Write-Host ("  From : " + $state.active)
     Write-Host ("  To   : " + $previousSlug)
 
-    Set-PortableProcessEnvironment -Context $context
+    Set-PortableProcessEnvironment -Context $context -RuntimeMode
 
     if (-not (Test-PostgresReady -Context $context)) {
         Start-PortablePostgres -Context $context
@@ -3678,25 +3700,25 @@ try {
         'Start' {
             $slug = Get-ActiveRuntimeSlug -Root $script:PortableRoot
             $context = New-PortableContext -TargetTriple $script:TargetTriple -RuntimeSlug $slug
-            Set-PortableProcessEnvironment -Context $context
+            Set-PortableProcessEnvironment -Context $context -RuntimeMode
             $actionResult = Start-LiteLLMProxy -Context $context -ProxyArgument $LiteLLMArgument
         }
         'Stop' {
             $slug = Get-ActiveRuntimeSlug -Root $script:PortableRoot -AllowMissing
             $context = New-PortableContext -TargetTriple $script:TargetTriple -RuntimeSlug $slug
-            Set-PortableProcessEnvironment -Context $context
+            Set-PortableProcessEnvironment -Context $context -RuntimeMode
             $actionResult = Stop-PortablePostgres -Context $context
         }
         'Verify' {
             $slug = Get-ActiveRuntimeSlug -Root $script:PortableRoot
             $context = New-PortableContext -TargetTriple $script:TargetTriple -RuntimeSlug $slug
-            Set-PortableProcessEnvironment -Context $context
+            Set-PortableProcessEnvironment -Context $context -RuntimeMode
             $actionResult = Test-PortableDeployment -Context $context
         }
         'Status' {
             $slug = Get-ActiveRuntimeSlug -Root $script:PortableRoot -AllowMissing
             $context = New-PortableContext -TargetTriple $script:TargetTriple -RuntimeSlug $slug
-            Set-PortableProcessEnvironment -Context $context
+            Set-PortableProcessEnvironment -Context $context -RuntimeMode
             $actionResult = Get-PortableStatus -Context $context
         }
         default {
