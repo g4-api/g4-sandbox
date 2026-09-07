@@ -4273,8 +4273,8 @@ Write-Progress `
 
 # A staged PostgreSQL cluster is valid only if its required empty directories
 # also reached the published sandbox.
-$stagedPostgresData = Join-Path $stageDirectory "litellm\data\postgresql"
-$publishedPostgresData = Join-Path $sandboxDirectory "litellm\data\postgresql"
+$stagedPostgresData = [System.IO.Path]::Combine($stageDirectory, "litellm", "data", "postgresql")
+$publishedPostgresData = [System.IO.Path]::Combine($sandboxDirectory, "litellm", "data", "postgresql")
 
 if (Test-Path -LiteralPath (Join-Path $stagedPostgresData "PG_VERSION")) {
     $requiredPostgresDirectories = @(
@@ -4296,6 +4296,37 @@ if (Test-Path -LiteralPath (Join-Path $stagedPostgresData "PG_VERSION")) {
 
     if ($missingPostgresDirectories.Count -gt 0) {
         throw "Published PostgreSQL cluster is incomplete. Missing directories: $($missingPostgresDirectories -join ', ')."
+    }
+}
+
+$publishedRuntimeStatePath = [System.IO.Path]::Combine(
+    $sandboxDirectory,
+    "litellm",
+    "state",
+    "active-runtime.json")
+if (Test-Path -LiteralPath $publishedRuntimeStatePath) {
+    try {
+        $publishedRuntimeState = Get-Content -LiteralPath $publishedRuntimeStatePath -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "Published LiteLLM runtime state is invalid: $($_.Exception.Message)"
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$publishedRuntimeState.active)) {
+        throw "Published LiteLLM runtime state does not identify an active runtime."
+    }
+
+    $queryEngineName = if ($OperatingSystem -eq "Windows") { "query-engine.exe" } else { "query-engine" }
+    $publishedQueryEnginePath = [System.IO.Path]::Combine(
+        $sandboxDirectory,
+        "litellm",
+        "runtimes",
+        [string]$publishedRuntimeState.active,
+        "prisma",
+        $queryEngineName)
+
+    if (-not (Test-Path -LiteralPath $publishedQueryEnginePath -PathType Leaf)) {
+        throw "Published LiteLLM Prisma query engine is missing: $publishedQueryEnginePath"
     }
 }
 

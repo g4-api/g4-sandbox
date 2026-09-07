@@ -777,6 +777,7 @@ function New-PortableContext {
         PrismaCliPath            = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'binaries\node_modules\.bin\prisma.cmd' } else { $null })
         PrismaNodeExe            = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'nodeenv\Scripts\node.exe' } else { $null })
         PrismaCliIndexJs         = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'binaries\node_modules\prisma\build\index.js' } else { $null })
+        PrismaQueryEnginePath    = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'query-engine.exe' } else { $null })
         PostgresHostAddress      = $PostgresHostAddress
         PostgresPort             = $PostgresPort
         PostgresDatabase         = $PostgresDatabase
@@ -913,6 +914,7 @@ function Set-PortableProcessEnvironment {
         $env:PRISMA_BINARY_CACHE_DIR = $Context.PrismaBinaryCacheDir
         $env:PRISMA_NODEENV_CACHE_DIR = $Context.PrismaNodeenvCacheDir
         $env:PRISMA_CLI_PATH = $Context.PrismaCliPath
+        $env:PRISMA_QUERY_ENGINE_BINARY = $Context.PrismaQueryEnginePath
         $env:NPM_CONFIG_CACHE = $Context.PrismaNpmCacheDir
 
         # Consumed by the generated helper files so they stay version-agnostic.
@@ -1699,6 +1701,7 @@ function New-PortableRuntimeContext {
         PrismaCliPath         = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'binaries\node_modules\.bin\prisma.cmd' } else { $null })
         PrismaNodeExe         = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'nodeenv\Scripts\node.exe' } else { $null })
         PrismaCliIndexJs      = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'binaries\node_modules\prisma\build\index.js' } else { $null })
+        PrismaQueryEnginePath = $(if ($null -ne $prismaCacheDirectory) { Join-Path $prismaCacheDirectory 'query-engine.exe' } else { $null })
         PostgresHostAddress   = $PostgresHostAddress
         PostgresPort          = $PostgresPort
         PostgresDatabase      = $PostgresDatabase
@@ -1797,6 +1800,7 @@ function Set-PortableRuntimeEnvironment {
         $env:PRISMA_BINARY_CACHE_DIR = $Context.PrismaBinaryCacheDir
         $env:PRISMA_NODEENV_CACHE_DIR = $Context.PrismaNodeenvCacheDir
         $env:PRISMA_CLI_PATH = $Context.PrismaCliPath
+        $env:PRISMA_QUERY_ENGINE_BINARY = $Context.PrismaQueryEnginePath
         $env:NPM_CONFIG_CACHE = $Context.PrismaNpmCacheDir
         $env:PORTABLE_PRISMA_NODE = $Context.PrismaNodeExe
         $env:PORTABLE_PRISMA_JS = $Context.PrismaCliIndexJs
@@ -2124,6 +2128,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
 . (Join-Path $PSScriptRoot 'litellm-runtime-common.ps1')
 
@@ -2589,8 +2594,9 @@ function Install-PrismaToolchain {
 
     $hasNodeRuntime = Test-Path -LiteralPath $Context.PrismaNodeExe
     $hasPrismaCli = Test-Path -LiteralPath $Context.PrismaCliIndexJs
+    $hasQueryEngine = Test-Path -LiteralPath $Context.PrismaQueryEnginePath
 
-    if ($hasNodeRuntime -and $hasPrismaCli) {
+    if ($hasNodeRuntime -and $hasPrismaCli -and $hasQueryEngine) {
         Write-Host '[OK] Portable Prisma toolchain already present.'
         return
     }
@@ -2635,6 +2641,26 @@ function Install-PrismaToolchain {
         throw [System.IO.FileNotFoundException]::new("Portable Prisma CLI was not created: $($Context.PrismaCliIndexJs)")
     }
 
+    $queryEngineCandidates = @(
+        @(
+            (Join-Path $Context.PrismaBinaryCacheDir 'node_modules\prisma\query-engine-windows.exe'),
+            (Join-Path $Context.PrismaBinaryCacheDir 'node_modules\@prisma\engines\query-engine-windows.exe')
+        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+    )
+
+    if ($queryEngineCandidates.Count -eq 0) {
+        throw [System.IO.FileNotFoundException]::new(
+            "Fetched Prisma query engine was not found under '$($Context.PrismaBinaryCacheDir)\node_modules'.")
+    }
+
+    $queryEngineSource = $queryEngineCandidates[0]
+    Copy-Item -LiteralPath $queryEngineSource -Destination $Context.PrismaQueryEnginePath -Force
+
+    if (-not (Test-Path -LiteralPath $Context.PrismaQueryEnginePath)) {
+        throw [System.IO.FileNotFoundException]::new("Portable Prisma query engine was not created: $($Context.PrismaQueryEnginePath)")
+    }
+
+    Invoke-NativeCommand -FilePath $Context.PrismaQueryEnginePath -ArgumentList @('--version')
     Invoke-NativeCommand -FilePath $pythonExe -ArgumentList @('-m', 'prisma', '--version')
 }
 
@@ -3033,6 +3059,10 @@ function Test-PortableDeployment {
         throw [System.IO.FileNotFoundException]::new("Prisma Python generator shim missing: $($Context.PrismaClientPyShimPath)")
     }
 
+    if (-not (Test-Path -LiteralPath $Context.PrismaQueryEnginePath)) {
+        throw [System.IO.FileNotFoundException]::new("Portable Prisma query engine missing: $($Context.PrismaQueryEnginePath)")
+    }
+
     # Stage: import check (also confirms pywin32 / pywintypes loads).
     Invoke-NativeCommand -FilePath $pythonExe -ArgumentList @('-c', $script:RuntimeVerifyExpression)
 
@@ -3190,6 +3220,7 @@ function Invoke-RuntimeBuild {
 
         $existing = (Get-Content -LiteralPath $Context.RuntimeManifestPath -Raw | ConvertFrom-Json)
         Set-RuntimePrismaEnvironment -CliVersion $existing.prismaCli -EngineVersion $existing.prismaEngine
+        Install-PrismaToolchain -Context $Context -NodeVersion $Context.PrismaNodeVersion
         return
     }
 
