@@ -2640,6 +2640,14 @@ function Install-PrismaToolchain {
     }
 
     # Stage: network fetch. Prisma reuses the nodeenv above and installs the pinned CLI + engines.
+    # prisma-client-python's `py fetch` calls its npm installer directly, before the wrapper that
+    # normally requests the standalone query-engine binary. Set the selector in the inherited
+    # process environment so Prisma's npm postinstall downloads the executable, not the Node-API
+    # library.
+    $previousCliQueryEngineType = [System.Environment]::GetEnvironmentVariable(
+        'PRISMA_CLI_QUERY_ENGINE_TYPE',
+        [System.EnvironmentVariableTarget]::Process)
+    $env:PRISMA_CLI_QUERY_ENGINE_TYPE = 'binary'
     $env:PRISMA_OFFLINE_MODE = 'false'
     try {
         $fetchArguments = @('-m', 'prisma', 'py', 'fetch')
@@ -2651,6 +2659,10 @@ function Install-PrismaToolchain {
     }
     finally {
         $env:PRISMA_OFFLINE_MODE = 'true'
+        [System.Environment]::SetEnvironmentVariable(
+            'PRISMA_CLI_QUERY_ENGINE_TYPE',
+            $previousCliQueryEngineType,
+            [System.EnvironmentVariableTarget]::Process)
     }
 
     if (-not (Test-Path -LiteralPath $Context.PrismaNodeExe)) {
