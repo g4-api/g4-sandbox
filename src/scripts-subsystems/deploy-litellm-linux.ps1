@@ -1982,6 +1982,33 @@ function Get-PostgresLogTail {
     return "Last PostgreSQL log lines:`n" + ($tailLines -join "`n")
 }
 
+function Clear-StalePostgresLock {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $lockFile = Join-Path $Context.PgData 'postmaster.pid'
+
+    if (-not (Test-Path -LiteralPath $lockFile)) {
+        return
+    }
+
+    $lockPid = 0
+    $firstLine = (Get-Content -LiteralPath $lockFile -TotalCount 1 -ErrorAction SilentlyContinue)
+
+    if (-not [int]::TryParse($firstLine, [ref]$lockPid)) {
+        return
+    }
+
+    $lockedProcess = Get-Process -Id $lockPid -ErrorAction SilentlyContinue
+
+    if ($null -eq $lockedProcess) {
+        Write-Host "[OK] Removing stale postmaster.pid (process $lockPid is not running)."
+        Remove-Item -LiteralPath $lockFile -Force -ErrorAction Ignore
+    }
+}
 function Start-PortablePostgres {
     [CmdletBinding()]
     param(
@@ -2000,7 +2027,19 @@ function Start-PortablePostgres {
         return
     }
 
-    Invoke-PgCtl -Context $Context -ArgumentList @('start', '-D', $Context.PgData, '-l', $Context.PostgresLogPath, '-w') -TimeoutSeconds 120
+    Clear-StalePostgresLock -Context $Context
+
+    try {
+        Invoke-PgCtl -Context $Context -ArgumentList @('start', '-D', $Context.PgData, '-l', $Context.PostgresLogPath, '-w') -TimeoutSeconds 120
+    }
+    catch {
+        $logTail = Get-PostgresLogTail -Context $Context
+        $message = $_.Exception.Message
+        if ($logTail) {
+            $message = $message + "`n" + $logTail
+        }
+        throw [System.InvalidOperationException]::new($message)
+    }
 
     if (-not (Test-PostgresReady -Context $Context)) {
         $logTail = Get-PostgresLogTail -Context $Context
@@ -2831,6 +2870,33 @@ function Get-PostgresLogTail {
     return "Last PostgreSQL log lines:`n" + ($tailLines -join "`n")
 }
 
+function Clear-StalePostgresLock {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $lockFile = Join-Path $Context.PgData 'postmaster.pid'
+
+    if (-not (Test-Path -LiteralPath $lockFile)) {
+        return
+    }
+
+    $lockPid = 0
+    $firstLine = (Get-Content -LiteralPath $lockFile -TotalCount 1 -ErrorAction SilentlyContinue)
+
+    if (-not [int]::TryParse($firstLine, [ref]$lockPid)) {
+        return
+    }
+
+    $lockedProcess = Get-Process -Id $lockPid -ErrorAction SilentlyContinue
+
+    if ($null -eq $lockedProcess) {
+        Write-Host "[OK] Removing stale postmaster.pid (process $lockPid is not running)."
+        Remove-Item -LiteralPath $lockFile -Force -ErrorAction Ignore
+    }
+}
 function Start-PortablePostgres {
     [CmdletBinding()]
     param(
@@ -2849,7 +2915,19 @@ function Start-PortablePostgres {
         return
     }
 
-    Invoke-PgCtl -Context $Context -ArgumentList @('start', '-D', $Context.PgData, '-l', $Context.PostgresLogPath, '-w') -TimeoutSeconds 120
+    Clear-StalePostgresLock -Context $Context
+
+    try {
+        Invoke-PgCtl -Context $Context -ArgumentList @('start', '-D', $Context.PgData, '-l', $Context.PostgresLogPath, '-w') -TimeoutSeconds 120
+    }
+    catch {
+        $logTail = Get-PostgresLogTail -Context $Context
+        $message = $_.Exception.Message
+        if ($logTail) {
+            $message = $message + "`n" + $logTail
+        }
+        throw [System.InvalidOperationException]::new($message)
+    }
 
     if (-not (Test-PostgresReady -Context $Context)) {
         $logTail = Get-PostgresLogTail -Context $Context
