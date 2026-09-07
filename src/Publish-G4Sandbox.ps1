@@ -4197,6 +4197,23 @@ New-Item -ItemType Directory -Path $sandboxDirectory -Force | Out-Null
 #   - TrimEnd ensures consistent substring math later.
 $stageRoot = (Resolve-Path $stageDirectory).Path.TrimEnd('\', '/')
 
+# Copy directories before files so required empty runtime directories, such as
+# PostgreSQL's pg_notify, survive publication.
+$directories = Get-ChildItem -Path $stageDirectory -Recurse -Force -Directory
+
+foreach ($directory in $directories) {
+    $fullPath = (Resolve-Path $directory.FullName).Path
+
+    if (-not $fullPath.StartsWith($stageRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning "Directory path is not under stage directory: $($fullPath)"
+        continue
+    }
+
+    $relativePath = $fullPath.Substring($stageRoot.Length).TrimStart('\', '/')
+    $destinationPath = Join-Path $sandboxDirectory $relativePath
+    New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
+}
+
 # Get all FILES to copy (not directories), so progress can reach 100%.
 #
 # Notes:
@@ -4253,6 +4270,34 @@ Write-Progress `
     -Status          "100% complete ($total/$total)" `
     -PercentComplete 100 `
     -Completed
+
+# A staged PostgreSQL cluster is valid only if its required empty directories
+# also reached the published sandbox.
+$stagedPostgresData = Join-Path $stageDirectory "litellm\data\postgresql"
+$publishedPostgresData = Join-Path $sandboxDirectory "litellm\data\postgresql"
+
+if (Test-Path -LiteralPath (Join-Path $stagedPostgresData "PG_VERSION")) {
+    $requiredPostgresDirectories = @(
+        "pg_commit_ts",
+        "pg_dynshmem",
+        "pg_notify",
+        "pg_replslot",
+        "pg_serial",
+        "pg_snapshots",
+        "pg_stat_tmp",
+        "pg_tblspc",
+        "pg_twophase"
+    )
+
+    $missingPostgresDirectories = @(
+        $requiredPostgresDirectories |
+            Where-Object { -not (Test-Path -LiteralPath (Join-Path $publishedPostgresData $_) -PathType Container) }
+    )
+
+    if ($missingPostgresDirectories.Count -gt 0) {
+        throw "Published PostgreSQL cluster is incomplete. Missing directories: $($missingPostgresDirectories -join ', ')."
+    }
+}
 
 # Ensure startup scripts are executable on Unix-like targets.
 #
@@ -4331,4 +4376,3 @@ Write-Host "   G4 Sandbox creation completed successfully"                -Foreg
 Write-Host "   Location: $($sandboxDirectory)"                            -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor DarkGray
 Write-Host ""
-
