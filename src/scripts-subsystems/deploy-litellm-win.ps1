@@ -49,7 +49,7 @@
       Rollback  Switch the active runtime back to the previous one. No rebuild. The database
                 schema is not reverted (Prisma migrations are forward-only).
       Start     Ensure PostgreSQL is running, then launch the active runtime's proxy foreground.
-      Stop      Stop the portable PostgreSQL server.
+      Stop      Stop the active LiteLLM proxy process tree, then stop portable PostgreSQL.
       Verify    Re-run verification for the active runtime.
       Status    Report installed runtimes, the active one, and service reachability.
 
@@ -754,6 +754,7 @@ function New-PortableContext {
         ConfigPath               = Join-Path $root $script:ConfigRelativePath
         ActiveRuntimeStatePath   = Join-Path $root $script:ActiveRuntimeStateRelativePath
         DeployCompleteMarkerPath = Join-Path $root $script:DeployCompleteMarkerRelativePath
+        ProxyProcessStatePath    = Join-Path $root 'state\proxy-process.json'
         PortablePrismaPath       = Join-Path $binDirectory 'portable_prisma.py'
         LiteLLMBootstrapPath     = Join-Path $binDirectory 'litellm-portable.py'
         DatabaseSetupScriptPath  = Join-Path $binDirectory 'setup-litellm-database.py'
@@ -893,6 +894,7 @@ function Set-PortableProcessEnvironment {
     $env:PGPORT = [string]$Context.PostgresPort
 
     $env:DATABASE_URL = $Context.DatabaseUrl
+    $env:PORTABLE_LITELLM_PROXY_STATE_PATH = $Context.ProxyProcessStatePath
 
     $env:LITELLM_HOST = $Context.LiteLLMHostAddress
     $env:LITELLM_PORT = [string]$Context.LiteLLMPort
@@ -1442,6 +1444,11 @@ def patch_subprocess() -> None:
     $liteLlmBootstrapPython = @'
 import os
 import site
+import sys
+import json
+import atexit
+from datetime import datetime, timezone
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Portable Python package bootstrap
@@ -1473,12 +1480,48 @@ patch_subprocess()
 
 
 # ---------------------------------------------------------------------------
+# Proxy process state
+# ---------------------------------------------------------------------------
+
+_proxy_state_value = os.environ.get("PORTABLE_LITELLM_PROXY_STATE_PATH", "")
+_proxy_state_path = Path(_proxy_state_value) if _proxy_state_value else None
+
+
+def _remove_proxy_process_state() -> None:
+    if _proxy_state_path is None:
+        return
+
+    try:
+        state = json.loads(_proxy_state_path.read_text(encoding="utf-8"))
+        if int(state.get("processId", -1)) == os.getpid():
+            _proxy_state_path.unlink(missing_ok=True)
+    except (FileNotFoundError, OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+
+
+if _proxy_state_path is not None:
+    _proxy_state_path.parent.mkdir(parents=True, exist_ok=True)
+    _proxy_state = {
+        "processId": os.getpid(),
+        "executable": os.path.abspath(sys.executable),
+        "bootstrapPath": os.path.abspath(__file__),
+        "startedUtc": datetime.now(timezone.utc).isoformat(),
+    }
+    with _proxy_state_path.open("x", encoding="utf-8") as _proxy_state_file:
+        json.dump(_proxy_state, _proxy_state_file, indent=2)
+    atexit.register(_remove_proxy_process_state)
+
+
+# ---------------------------------------------------------------------------
 # Start LiteLLM
 # ---------------------------------------------------------------------------
 
-import litellm
+try:
+    import litellm
 
-litellm.run_server()
+    litellm.run_server()
+finally:
+    _remove_proxy_process_state()
 '@
 
     Write-BoxTextFile -Path $Context.LiteLLMBootstrapPath -Content $liteLlmBootstrapPython
@@ -1704,6 +1747,7 @@ function New-PortableRuntimeContext {
         PgData                = Join-Path $Root 'data\postgresql'
         PostgresLogPath       = Join-Path $Root 'data\postgresql.log'
         ConfigPath            = Join-Path $Root 'state\config.yaml'
+        ProxyProcessStatePath = Join-Path $Root 'state\proxy-process.json'
         LiteLLMBootstrapPath  = Join-Path $binDirectory 'litellm-portable.py'
         RuntimeSlug           = $RuntimeSlug
         RuntimeDir            = $runtimeDirectory
@@ -1794,6 +1838,7 @@ function Set-PortableRuntimeEnvironment {
     $env:PGPORT = [string]$Context.PostgresPort
 
     $env:DATABASE_URL = $Context.DatabaseUrl
+    $env:PORTABLE_LITELLM_PROXY_STATE_PATH = $Context.ProxyProcessStatePath
 
     $env:LITELLM_HOST = $Context.LiteLLMHostAddress
     $env:LITELLM_PORT = [string]$Context.LiteLLMPort
@@ -2050,6 +2095,133 @@ function Start-PortablePostgres {
     Write-Host "[OK] PostgreSQL is accepting connections on $($Context.PostgresHostAddress):$($Context.PostgresPort)."
 }
 
+function Read-LiteLLMProxyProcessState {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    if (-not (Test-Path -LiteralPath $Context.ProxyProcessStatePath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        return (Get-Content -LiteralPath $Context.ProxyProcessStatePath -Raw | ConvertFrom-Json)
+    }
+    catch {
+        throw [System.InvalidOperationException]::new(
+            "LiteLLM proxy process state is invalid: $($Context.ProxyProcessStatePath)",
+            $_.Exception)
+    }
+}
+
+function Get-LiteLLMProxyProcess {
+    [CmdletBinding()]
+    [OutputType([Microsoft.Management.Infrastructure.CimInstance])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $state = Read-LiteLLMProxyProcessState -Context $Context
+    if ($null -eq $state) {
+        return $null
+    }
+
+    $proxyPid = 0
+    if (-not $state.PSObject.Properties['processId'] -or
+        -not [int]::TryParse("$($state.processId)", [ref]$proxyPid) -or
+        $proxyPid -le 0) {
+        throw [System.InvalidOperationException]::new(
+            "LiteLLM proxy process state has an invalid processId: $($Context.ProxyProcessStatePath)")
+    }
+
+    $process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $proxyPid" -ErrorAction SilentlyContinue
+    if ($null -eq $process) {
+        Remove-Item -LiteralPath $Context.ProxyProcessStatePath -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+
+    $expectedPython = Get-PortablePythonExe -Context $Context
+    $expectedBootstrap = [System.IO.Path]::GetFullPath($Context.LiteLLMBootstrapPath)
+    $actualPython = [string]$process.ExecutablePath
+    $commandLine = [string]$process.CommandLine
+
+    $identityMatches = -not [string]::IsNullOrWhiteSpace($actualPython) -and
+        [string]::Equals(
+            [System.IO.Path]::GetFullPath($actualPython),
+            [System.IO.Path]::GetFullPath($expectedPython),
+            [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not [string]::IsNullOrWhiteSpace($commandLine) -and
+        $commandLine.IndexOf($expectedBootstrap, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+
+    if (-not $identityMatches) {
+        throw [System.InvalidOperationException]::new(
+            "Refusing to stop process $proxyPid because it is not this box's LiteLLM proxy. Remove stale state only after verifying the process: $($Context.ProxyProcessStatePath)")
+    }
+
+    return $process
+}
+
+function Stop-LiteLLMProxy {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $process = Get-LiteLLMProxyProcess -Context $Context
+    if ($null -eq $process) {
+        if (Test-TcpEndpoint -TargetHost $Context.LiteLLMHostAddress -Port $Context.LiteLLMPort -TimeoutMilliseconds 300) {
+            throw [System.InvalidOperationException]::new(
+                "LiteLLM port $($Context.LiteLLMPort) is listening but no validated proxy process state exists. Refusing to stop PostgreSQL.")
+        }
+
+        Write-Host '[OK] LiteLLM proxy is not running.'
+        return [pscustomobject]@{ ProxyStopped = $false }
+    }
+
+    $proxyPid = [int]$process.ProcessId
+    $allProcesses = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)
+    $pending = @($proxyPid)
+    $processTree = @()
+
+    while ($pending.Count -gt 0) {
+        $parentPid = [int]$pending[0]
+        $pending = @($pending | Select-Object -Skip 1)
+        $children = @($allProcesses | Where-Object { [int]$_.ParentProcessId -eq $parentPid })
+        foreach ($child in $children) {
+            $childPid = [int]$child.ProcessId
+            if ($processTree -notcontains $childPid) {
+                $processTree += $childPid
+                $pending += $childPid
+            }
+        }
+    }
+
+    [array]::Reverse($processTree)
+    foreach ($processId in @($processTree) + @($proxyPid)) {
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ($null -ne (Get-Process -Id $proxyPid -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+    }
+
+    if ($null -ne (Get-Process -Id $proxyPid -ErrorAction SilentlyContinue)) {
+        throw [System.InvalidOperationException]::new(
+            "LiteLLM proxy process $proxyPid did not stop. PostgreSQL was left running.")
+    }
+
+    Remove-Item -LiteralPath $Context.ProxyProcessStatePath -Force -ErrorAction SilentlyContinue
+    Write-Host '[OK] LiteLLM proxy stopped.'
+    return [pscustomobject]@{ ProxyStopped = $true; ProcessId = $proxyPid }
+}
+
 function Stop-PortablePostgres {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -2089,6 +2261,17 @@ function Start-LiteLLMProxy {
 
     $pythonExe = Get-PortablePythonExe -Context $Context
     $env:PORTABLE_PYTHON_EXE = $pythonExe
+
+    $existingProxy = Get-LiteLLMProxyProcess -Context $Context
+    if ($null -ne $existingProxy) {
+        throw [System.InvalidOperationException]::new(
+            "LiteLLM proxy is already running as process $($existingProxy.ProcessId).")
+    }
+
+    if (Test-TcpEndpoint -TargetHost $Context.LiteLLMHostAddress -Port $Context.LiteLLMPort -TimeoutMilliseconds 300) {
+        throw [System.InvalidOperationException]::new(
+            "Port $($Context.LiteLLMPort) is already in use by an untracked process.")
+    }
 
     $pgVersionMarker = Join-Path $Context.PgData 'PG_VERSION'
     if (-not (Test-Path -LiteralPath $pgVersionMarker)) {
@@ -2230,6 +2413,7 @@ $context = New-PortableRuntimeContext -Root $root -RuntimeSlug $slug `
 
 Set-PortableRuntimeEnvironment -Context $context
 
+Stop-LiteLLMProxy -Context $context | Out-Null
 Stop-PortablePostgres -Context $context
 '@
 
@@ -3003,6 +3187,133 @@ function Stop-PortablePostgres {
     return [pscustomobject]@{ Action = 'Stop'; PostgresStopped = $true }
 }
 
+function Read-LiteLLMProxyProcessState {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    if (-not (Test-Path -LiteralPath $Context.ProxyProcessStatePath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        return (Get-Content -LiteralPath $Context.ProxyProcessStatePath -Raw | ConvertFrom-Json)
+    }
+    catch {
+        throw [System.InvalidOperationException]::new(
+            "LiteLLM proxy process state is invalid: $($Context.ProxyProcessStatePath)",
+            $_.Exception)
+    }
+}
+
+function Get-LiteLLMProxyProcess {
+    [CmdletBinding()]
+    [OutputType([Microsoft.Management.Infrastructure.CimInstance])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $state = Read-LiteLLMProxyProcessState -Context $Context
+    if ($null -eq $state) {
+        return $null
+    }
+
+    $proxyPid = 0
+    if (-not $state.PSObject.Properties['processId'] -or
+        -not [int]::TryParse("$($state.processId)", [ref]$proxyPid) -or
+        $proxyPid -le 0) {
+        throw [System.InvalidOperationException]::new(
+            "LiteLLM proxy process state has an invalid processId: $($Context.ProxyProcessStatePath)")
+    }
+
+    $process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $proxyPid" -ErrorAction SilentlyContinue
+    if ($null -eq $process) {
+        Remove-Item -LiteralPath $Context.ProxyProcessStatePath -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+
+    $expectedPython = Get-PortablePythonExe -Context $Context
+    $expectedBootstrap = [System.IO.Path]::GetFullPath($Context.LiteLLMBootstrapPath)
+    $actualPython = [string]$process.ExecutablePath
+    $commandLine = [string]$process.CommandLine
+
+    $identityMatches = -not [string]::IsNullOrWhiteSpace($actualPython) -and
+        [string]::Equals(
+            [System.IO.Path]::GetFullPath($actualPython),
+            [System.IO.Path]::GetFullPath($expectedPython),
+            [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not [string]::IsNullOrWhiteSpace($commandLine) -and
+        $commandLine.IndexOf($expectedBootstrap, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+
+    if (-not $identityMatches) {
+        throw [System.InvalidOperationException]::new(
+            "Refusing to stop process $proxyPid because it is not this box's LiteLLM proxy. Remove stale state only after verifying the process: $($Context.ProxyProcessStatePath)")
+    }
+
+    return $process
+}
+
+function Stop-LiteLLMProxy {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Context
+    )
+
+    $process = Get-LiteLLMProxyProcess -Context $Context
+    if ($null -eq $process) {
+        if (Test-TcpEndpoint -TargetHost $Context.LiteLLMHostAddress -Port $Context.LiteLLMPort -TimeoutMilliseconds 300) {
+            throw [System.InvalidOperationException]::new(
+                "LiteLLM port $($Context.LiteLLMPort) is listening but no validated proxy process state exists. Refusing to stop PostgreSQL.")
+        }
+
+        Write-Host '[OK] LiteLLM proxy is not running.'
+        return [pscustomobject]@{ ProxyStopped = $false }
+    }
+
+    $proxyPid = [int]$process.ProcessId
+    $allProcesses = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)
+    $pending = @($proxyPid)
+    $processTree = @()
+
+    while ($pending.Count -gt 0) {
+        $parentPid = [int]$pending[0]
+        $pending = @($pending | Select-Object -Skip 1)
+        $children = @($allProcesses | Where-Object { [int]$_.ParentProcessId -eq $parentPid })
+        foreach ($child in $children) {
+            $childPid = [int]$child.ProcessId
+            if ($processTree -notcontains $childPid) {
+                $processTree += $childPid
+                $pending += $childPid
+            }
+        }
+    }
+
+    [array]::Reverse($processTree)
+    foreach ($processId in @($processTree) + @($proxyPid)) {
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ($null -ne (Get-Process -Id $proxyPid -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+    }
+
+    if ($null -ne (Get-Process -Id $proxyPid -ErrorAction SilentlyContinue)) {
+        throw [System.InvalidOperationException]::new(
+            "LiteLLM proxy process $proxyPid did not stop. PostgreSQL was left running.")
+    }
+
+    Remove-Item -LiteralPath $Context.ProxyProcessStatePath -Force -ErrorAction SilentlyContinue
+    Write-Host '[OK] LiteLLM proxy stopped.'
+    return [pscustomobject]@{ ProxyStopped = $true; ProcessId = $proxyPid }
+}
+
 function Initialize-LiteLLMDatabase {
     [CmdletBinding()]
     param(
@@ -3203,6 +3514,17 @@ function Start-LiteLLMProxy {
 
     $pythonExe = Get-PortablePythonExe -Context $Context
     $env:PORTABLE_PYTHON_EXE = $pythonExe
+
+    $existingProxy = Get-LiteLLMProxyProcess -Context $Context
+    if ($null -ne $existingProxy) {
+        throw [System.InvalidOperationException]::new(
+            "LiteLLM proxy is already running as process $($existingProxy.ProcessId).")
+    }
+
+    if (Test-TcpEndpoint -TargetHost $Context.LiteLLMHostAddress -Port $Context.LiteLLMPort -TimeoutMilliseconds 300) {
+        throw [System.InvalidOperationException]::new(
+            "Port $($Context.LiteLLMPort) is already in use by an untracked process.")
+    }
 
     $pgVersionMarker = Join-Path $Context.PgData 'PG_VERSION'
     if (-not (Test-Path -LiteralPath $pgVersionMarker)) {
@@ -3683,6 +4005,7 @@ try {
             $slug = Get-ActiveRuntimeSlug -Root $script:PortableRoot -AllowMissing
             $context = New-PortableContext -TargetTriple $script:TargetTriple -RuntimeSlug $slug
             Set-PortableProcessEnvironment -Context $context -RuntimeMode
+            Stop-LiteLLMProxy -Context $context | Out-Null
             $actionResult = Stop-PortablePostgres -Context $context
         }
         'Verify' {
