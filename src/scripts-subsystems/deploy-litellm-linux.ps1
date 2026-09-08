@@ -1944,6 +1944,41 @@ function Invoke-NativeCommand {
     }
 }
 
+function Test-TcpEndpoint {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TargetHost,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Port,
+
+        [Parameter()]
+        [int]$TimeoutMilliseconds = 1500
+    )
+
+    $tcpClient = New-Object System.Net.Sockets.TcpClient
+
+    try {
+        $connectResult = $tcpClient.BeginConnect($TargetHost, $Port, $null, $null)
+        $connectedInTime = $connectResult.AsyncWaitHandle.WaitOne($TimeoutMilliseconds)
+
+        if (-not $connectedInTime) {
+            return $false
+        }
+
+        $tcpClient.EndConnect($connectResult)
+        return $true
+    }
+    catch [System.Net.Sockets.SocketException] {
+        return $false
+    }
+    finally {
+        $tcpClient.Close()
+    }
+}
+
 function Test-PostgresReady {
     [CmdletBinding()]
     [OutputType([bool])]
