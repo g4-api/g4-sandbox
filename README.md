@@ -209,7 +209,7 @@ The box is created at the sandbox root as `litellm/`, and launchers are placed b
 <sandbox>/
   litellm/                  the portable LiteLLM box (runtimes, data, state, cache)
     start-litellm.cmd|sh    generated mirror — starts PostgreSQL + the LiteLLM proxy
-    stop-litellm.cmd|sh     generated mirror — stops the portable PostgreSQL server
+    stop-litellm.cmd|sh     generated mirror — stops the LiteLLM proxy, then PostgreSQL
   start-litellm.cmd         Windows launcher (forwards to litellm/start-litellm.cmd)
   start-litellm.sh          Linux launcher   (forwards to litellm/start-litellm.sh)
   stop-litellm.cmd          Windows launcher (forwards to litellm/stop-litellm.cmd)
