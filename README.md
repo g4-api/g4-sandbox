@@ -173,7 +173,7 @@ pwsh ./Publish-G4Sandbox.ps1 [parameters]
 | Parameter         | Description                      |
 | ----------------- | -------------------------------- |
 | `BotVolume`       | Root working volume for the bot  |
-| `ChormeVersion`   | Optional Chrome version selector |
+| `ChromeVersion`   | Optional Chrome version selector |
 | `DotnetVersion`   | .NET major version (default: 10) |
 | `HubUri`          | G4 Hub endpoint                  |
 | `OperatingSystem` | Target OS (Windows/Linux/MacOs)  |

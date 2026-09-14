@@ -43,7 +43,8 @@ param(
     #   - Passed through to Chrome artifact resolver
     #   - Can be full version (e.g., 120.0.6099.71) or major prefix (e.g., 120)
     #   - When omitted in downstream calls, latest stable may be used
-    [string]$ChormeVersion,
+    [Alias('ChormeVersion')]
+    [string]$ChromeVersion,
     
     # .NET major version selector.
     #
@@ -446,9 +447,7 @@ function Get-ChromeArtifacts {
             Write-Host "$($download.Name) installation completed. Destination directory: '$($download.DestinationDirectory)'" -ForegroundColor Cyan
         }
         catch {
-            Write-Warning "Download or extraction failed for: $($download.Url)"
-            Write-Warning $_.Exception.Message
-            return
+            throw "Chrome artifact deployment failed for '$($download.Url)': $($_.Exception.Message)"
         }
     }
 }
@@ -3562,19 +3561,7 @@ set "OPENCODE_DISABLE_AUTOUPDATE=1"
 "%BOX_ROOT%runtime\bin\opencode.exe" %*
 exit /b %ERRORLEVEL%
 '@
-                # Core launcher: link the partition agents/skills into .opencode and start the boxed OpenCode.
-                $partitionRunner = @'
-@echo off
-setlocal
-set "PARTITION_ROOT=%~dp0"
-cd /d "%PARTITION_ROOT%" || exit /b 1
-if not exist "%PARTITION_ROOT%.opencode" mkdir "%PARTITION_ROOT%.opencode"
-if not exist "%PARTITION_ROOT%.opencode\agents" mklink /J "%PARTITION_ROOT%.opencode\agents" "%PARTITION_ROOT%agents" >nul || exit /b 1
-if not exist "%PARTITION_ROOT%.opencode\skills" mklink /J "%PARTITION_ROOT%.opencode\skills" "%PARTITION_ROOT%skills" >nul || exit /b 1
-call "%PARTITION_ROOT%opencode\start.cmd" --auto %*
-exit /b %ERRORLEVEL%
-'@
-                # Entry launcher: relaunch inside the bundled Windows Terminal, then fall through to the runner.
+                # Entry launcher: relaunch itself inside the bundled Windows Terminal, then start boxed OpenCode.
                 # WT_SESSION is set by Windows Terminal in every shell it spawns, which guards against re-launch loops.
                 $partitionLauncher = @'
 @echo off
@@ -3583,14 +3570,17 @@ set "PARTITION_ROOT=%~dp0"
 set "WT_EXE=%PARTITION_ROOT%..\..\..\bot-utilities\windows-terminal\wt.exe"
 if defined WT_SESSION goto run
 if not exist "%WT_EXE%" goto run
-start "" "%WT_EXE%" -w new --title "G4 OpenCode" -d "%PARTITION_ROOT%." cmd /k call "%PARTITION_ROOT%run-opencode.cmd" %*
+start "" "%WT_EXE%" -w new --title "G4 OpenCode" -d "%PARTITION_ROOT%." cmd /k call "%PARTITION_ROOT%start-opencode.cmd" %*
 exit /b 0
 :run
-call "%PARTITION_ROOT%run-opencode.cmd" %*
+cd /d "%PARTITION_ROOT%" || exit /b 1
+if not exist "%PARTITION_ROOT%.opencode" mkdir "%PARTITION_ROOT%.opencode"
+if not exist "%PARTITION_ROOT%.opencode\agents" mklink /J "%PARTITION_ROOT%.opencode\agents" "%PARTITION_ROOT%agents" >nul || exit /b 1
+if not exist "%PARTITION_ROOT%.opencode\skills" mklink /J "%PARTITION_ROOT%.opencode\skills" "%PARTITION_ROOT%skills" >nul || exit /b 1
+call "%PARTITION_ROOT%opencode\start.cmd" --auto %*
 exit /b %ERRORLEVEL%
 '@
                 Set-Content -LiteralPath (Join-Path $boxRoot 'start.cmd') -Value $boxLauncher -Encoding ASCII
-                Set-Content -LiteralPath (Join-Path $partitionRoot 'run-opencode.cmd') -Value $partitionRunner -Encoding ASCII
                 Set-Content -LiteralPath (Join-Path $partitionRoot 'start-opencode.cmd') -Value $partitionLauncher -Encoding ASCII
             }
             else {
@@ -3883,11 +3873,25 @@ Publish-PortableOpenCode `
 #   - Artifacts are stored under browsers/<os>/chrome and drivers/<os>/chrome
 #   - -Clean ensures deterministic rebuilds
 Get-ChromeArtifacts `
+    -Version                    $ChromeVersion `
     -OperatingSystem            $OperatingSystem `
     -ArchiveDirectory           $workDirectory `
     -ChromeDestinationDirectory ([System.IO.Path]::Combine($browsersDirectory, "chrome")) `
     -DriverDestinationDirectory ([System.IO.Path]::Combine($driversDirectory, "chrome")) `
     -Clean
+
+$chromeExecutableName = if ($OperatingSystem -eq "Windows") { "chrome.exe" } else { "chrome" }
+$driverExecutableName = if ($OperatingSystem -eq "Windows") { "chromedriver.exe" } else { "chromedriver" }
+$chromeExecutablePath = [System.IO.Path]::Combine($browsersDirectory, "chrome", $chromeExecutableName)
+$driverExecutablePath = [System.IO.Path]::Combine($driversDirectory, "chrome", $driverExecutableName)
+
+if (-not (Test-Path -LiteralPath $chromeExecutablePath -PathType Leaf)) {
+    throw "Chrome deployment failed: '$($chromeExecutablePath)' was not created."
+}
+
+if (-not (Test-Path -LiteralPath $driverExecutablePath -PathType Leaf)) {
+    throw "ChromeDriver deployment failed: '$($driverExecutablePath)' was not created."
+}
 
 # Download portable .NET runtime.
 Get-Dotnet `
