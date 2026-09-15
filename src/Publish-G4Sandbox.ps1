@@ -3827,6 +3827,7 @@ $archives = @(
 #   - These are stored offline under bot-utilities/vsixs
 #   - Enables fully portable/offline dev environments
 $vscodeExtensions = @(
+    'echoapi.echoapi-for-vscode',
     "g4-api.g4-engine-client",
     "github.copilot-chat",
     "jakubkozera.csharp-dev-tools",
