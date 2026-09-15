@@ -43,7 +43,8 @@ param(
     #   - Passed through to Chrome artifact resolver
     #   - Can be full version (e.g., 120.0.6099.71) or major prefix (e.g., 120)
     #   - When omitted in downstream calls, latest stable may be used
-    [string]$ChormeVersion,
+    [Alias('ChormeVersion')]
+    [string]$ChromeVersion,
     
     # .NET major version selector.
     #
@@ -79,7 +80,15 @@ param(
     # Behavior:
     #   - Downstream steps may remove existing directories
     #   - Ensures deterministic build output
-    [switch]$Clean
+    [switch]$Clean,
+
+    # When specified, skips the portable LiteLLM subsystem deployment.
+    #
+    # Notes:
+    #   - The sandbox is published without the 'litellm' box
+    #   - start-litellm.cmd / start-litellm.sh remain in the sandbox root but
+    #     will report that the subsystem is missing
+    [switch]$SkipLiteLLM
 )
 
 # Enable strict mode for safer scripting.
@@ -438,9 +447,7 @@ function Get-ChromeArtifacts {
             Write-Host "$($download.Name) installation completed. Destination directory: '$($download.DestinationDirectory)'" -ForegroundColor Cyan
         }
         catch {
-            Write-Warning "Download or extraction failed for: $($download.Url)"
-            Write-Warning $_.Exception.Message
-            return
+            throw "Chrome artifact deployment failed for '$($download.Url)': $($_.Exception.Message)"
         }
     }
 }
@@ -3258,6 +3265,106 @@ function Copy-SelectedG4AiAssets {
     }
 }
 
+function Publish-PortableLiteLLM {
+    <#
+    .SYNOPSIS
+        Deploys the portable LiteLLM subsystem into the staged sandbox.
+
+    .DESCRIPTION
+        Selects the operating-system specific deployment script from
+        'scripts-subsystems' and executes it against '<stage>\litellm', so the
+        published sandbox ships with a fully installed, self-contained LiteLLM
+        proxy stack (uv, CPython, LiteLLM packages, Prisma toolchain and a
+        portable PostgreSQL cluster).
+
+        Dispatch rules:
+          - Windows -> deploy-litellm-win.ps1
+          - Linux   -> deploy-litellm-linux.ps1
+          - Anything else (for example MacOs) -> skipped with a warning
+
+        After a successful deployment the portable PostgreSQL server is stopped
+        ('-Action Stop'), because the deployment leaves it running detached and
+        the box must not be relocated while the server is up.
+
+    .NOTES
+        - The deployment scripts are build-time tooling only; they are not
+          copied into the published sandbox.
+        - Failures are non-fatal: a warning is emitted and the publish continues
+          without the LiteLLM subsystem.
+    #>
+    [CmdletBinding()]
+    param(
+        # Target operating system that selects the deployment script.
+        [Parameter(Mandatory = $true)]
+        [string]$OperatingSystem,
+
+        # Directory that contains deploy-litellm-win.ps1 / deploy-litellm-linux.ps1.
+        [Parameter(Mandatory = $true)]
+        [string]$SubsystemsDirectory,
+
+        # Sandbox stage root; the LiteLLM box is created under '<stage>\litellm'.
+        [Parameter(Mandatory = $true)]
+        [string]$StageDirectory
+    )
+
+    # Resolve the deployment script for the requested target platform.
+    $deployScriptName = switch ($OperatingSystem.ToLowerInvariant()) {
+        'windows' { 'deploy-litellm-win.ps1' }
+        'linux'   { 'deploy-litellm-linux.ps1' }
+        default   { $null }
+    }
+
+    # Unsupported platforms (for example MacOs) are skipped, not failed.
+    if ([string]::IsNullOrWhiteSpace($deployScriptName)) {
+        Write-Warning "LiteLLM subsystem: unsupported operating system '$($OperatingSystem)'. Skipping deployment."
+        return
+    }
+
+    $deployScriptPath = Join-Path $SubsystemsDirectory $deployScriptName
+
+    # The deployment scripts are part of the repository; a missing file is a
+    # packaging problem, but must not abort an otherwise valid publish.
+    if (-not (Test-Path -LiteralPath $deployScriptPath)) {
+        Write-Warning "LiteLLM subsystem: deployment script '$($deployScriptPath)' was not found. Skipping deployment."
+        return
+    }
+
+    # The LiteLLM box lives in the sandbox root so the generated
+    # start-litellm.cmd / start-litellm.sh sit beside the root launchers.
+    $containerRoot = Join-Path $StageDirectory 'litellm'
+    New-Item -ItemType Directory -Path $containerRoot -Force | Out-Null
+
+    Write-Host "Deploying the portable LiteLLM subsystem into '$($containerRoot)'..." -ForegroundColor DarkGray
+
+    # The deployment scripts are standalone programs with their own error
+    # handling and are not written against StrictMode 'Latest'. Relax both
+    # settings for the duration of the call; because Set-StrictMode and the
+    # preference variable are scoped to this function, the caller's settings
+    # are restored automatically when the function returns.
+    Set-StrictMode -Off
+    $ErrorActionPreference = 'Continue'
+
+    try {
+        # Build the box (downloads uv, CPython, LiteLLM, Prisma and PostgreSQL,
+        # initializes the database and verifies the runtime).
+        & $deployScriptPath -Action Deploy -ContainerRoot $containerRoot
+
+        if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+            throw [System.InvalidOperationException]::new(
+                "'$($deployScriptName)' exited with code $($LASTEXITCODE).")
+        }
+
+        # Stop the detached PostgreSQL server so the staged box can safely be
+        # copied to the final sandbox location.
+        & $deployScriptPath -Action Stop -ContainerRoot $containerRoot
+
+        Write-Host "LiteLLM subsystem deployed successfully." -ForegroundColor Green
+    }
+    catch {
+        Write-Warning "LiteLLM subsystem deployment failed: $($_.Exception.Message). Continuing without LiteLLM."
+    }
+}
+
 function Publish-PortableOpenCode {
     [CmdletBinding()]
     param(
@@ -3454,19 +3561,7 @@ set "OPENCODE_DISABLE_AUTOUPDATE=1"
 "%BOX_ROOT%runtime\bin\opencode.exe" %*
 exit /b %ERRORLEVEL%
 '@
-                # Core launcher: link the partition agents/skills into .opencode and start the boxed OpenCode.
-                $partitionRunner = @'
-@echo off
-setlocal
-set "PARTITION_ROOT=%~dp0"
-cd /d "%PARTITION_ROOT%" || exit /b 1
-if not exist "%PARTITION_ROOT%.opencode" mkdir "%PARTITION_ROOT%.opencode"
-if not exist "%PARTITION_ROOT%.opencode\agents" mklink /J "%PARTITION_ROOT%.opencode\agents" "%PARTITION_ROOT%agents" >nul || exit /b 1
-if not exist "%PARTITION_ROOT%.opencode\skills" mklink /J "%PARTITION_ROOT%.opencode\skills" "%PARTITION_ROOT%skills" >nul || exit /b 1
-call "%PARTITION_ROOT%opencode\start.cmd" --auto %*
-exit /b %ERRORLEVEL%
-'@
-                # Entry launcher: relaunch inside the bundled Windows Terminal, then fall through to the runner.
+                # Entry launcher: relaunch itself inside the bundled Windows Terminal, then start boxed OpenCode.
                 # WT_SESSION is set by Windows Terminal in every shell it spawns, which guards against re-launch loops.
                 $partitionLauncher = @'
 @echo off
@@ -3475,14 +3570,17 @@ set "PARTITION_ROOT=%~dp0"
 set "WT_EXE=%PARTITION_ROOT%..\..\..\bot-utilities\windows-terminal\wt.exe"
 if defined WT_SESSION goto run
 if not exist "%WT_EXE%" goto run
-start "" "%WT_EXE%" -w new --title "G4 OpenCode" -d "%PARTITION_ROOT%." cmd /k call "%PARTITION_ROOT%run-opencode.cmd" %*
+start "" "%WT_EXE%" -w new --title "G4 OpenCode" -d "%PARTITION_ROOT%." cmd /k call "%PARTITION_ROOT%start-opencode.cmd" %*
 exit /b 0
 :run
-call "%PARTITION_ROOT%run-opencode.cmd" %*
+cd /d "%PARTITION_ROOT%" || exit /b 1
+if not exist "%PARTITION_ROOT%.opencode" mkdir "%PARTITION_ROOT%.opencode"
+if not exist "%PARTITION_ROOT%.opencode\agents" mklink /J "%PARTITION_ROOT%.opencode\agents" "%PARTITION_ROOT%agents" >nul || exit /b 1
+if not exist "%PARTITION_ROOT%.opencode\skills" mklink /J "%PARTITION_ROOT%.opencode\skills" "%PARTITION_ROOT%skills" >nul || exit /b 1
+call "%PARTITION_ROOT%opencode\start.cmd" --auto %*
 exit /b %ERRORLEVEL%
 '@
                 Set-Content -LiteralPath (Join-Path $boxRoot 'start.cmd') -Value $boxLauncher -Encoding ASCII
-                Set-Content -LiteralPath (Join-Path $partitionRoot 'run-opencode.cmd') -Value $partitionRunner -Encoding ASCII
                 Set-Content -LiteralPath (Join-Path $partitionRoot 'start-opencode.cmd') -Value $partitionLauncher -Encoding ASCII
             }
             else {
@@ -3729,6 +3827,7 @@ $archives = @(
 #   - These are stored offline under bot-utilities/vsixs
 #   - Enables fully portable/offline dev environments
 $vscodeExtensions = @(
+    'echoapi.echoapi-for-vscode',
     "g4-api.g4-engine-client",
     "github.copilot-chat",
     "jakubkozera.csharp-dev-tools",
@@ -3775,11 +3874,25 @@ Publish-PortableOpenCode `
 #   - Artifacts are stored under browsers/<os>/chrome and drivers/<os>/chrome
 #   - -Clean ensures deterministic rebuilds
 Get-ChromeArtifacts `
+    -Version                    $ChromeVersion `
     -OperatingSystem            $OperatingSystem `
     -ArchiveDirectory           $workDirectory `
     -ChromeDestinationDirectory ([System.IO.Path]::Combine($browsersDirectory, "chrome")) `
     -DriverDestinationDirectory ([System.IO.Path]::Combine($driversDirectory, "chrome")) `
     -Clean
+
+$chromeExecutableName = if ($OperatingSystem -eq "Windows") { "chrome.exe" } else { "chrome" }
+$driverExecutableName = if ($OperatingSystem -eq "Windows") { "chromedriver.exe" } else { "chromedriver" }
+$chromeExecutablePath = [System.IO.Path]::Combine($browsersDirectory, "chrome", $chromeExecutableName)
+$driverExecutablePath = [System.IO.Path]::Combine($driversDirectory, "chrome", $driverExecutableName)
+
+if (-not (Test-Path -LiteralPath $chromeExecutablePath -PathType Leaf)) {
+    throw "Chrome deployment failed: '$($chromeExecutablePath)' was not created."
+}
+
+if (-not (Test-Path -LiteralPath $driverExecutablePath -PathType Leaf)) {
+    throw "ChromeDriver deployment failed: '$($driverExecutablePath)' was not created."
+}
 
 # Download portable .NET runtime.
 Get-Dotnet `
@@ -4047,6 +4160,24 @@ if ($nodejsDependencies -and $nodejsDependencies.Count -gt 0) {
     }
 }
 
+# Deploy the portable LiteLLM subsystem into the stage.
+#
+# Notes:
+#   - Runs after every download and after the sandbox file copies, so the box
+#     is the last thing added before the stage is copied into the sandbox.
+#   - Windows and Linux targets each get their own deployment script; any other
+#     platform is skipped as unsupported.
+#   - Failures are non-fatal and only warn.
+if ($SkipLiteLLM) {
+    Write-Host "Skipping the LiteLLM subsystem deployment (-SkipLiteLLM)." -ForegroundColor DarkGray
+}
+else {
+    Publish-PortableLiteLLM `
+        -OperatingSystem      $OperatingSystem `
+        -SubsystemsDirectory  (Join-Path $sourceDirectory "scripts-subsystems") `
+        -StageDirectory       $stageDirectory
+}
+
 # Remove existing sandbox directory if requested.
 #
 # Notes:
@@ -4070,6 +4201,23 @@ New-Item -ItemType Directory -Path $sandboxDirectory -Force | Out-Null
 # Notes:
 #   - TrimEnd ensures consistent substring math later.
 $stageRoot = (Resolve-Path $stageDirectory).Path.TrimEnd('\', '/')
+
+# Copy directories before files so required empty runtime directories, such as
+# PostgreSQL's pg_notify, survive publication.
+$directories = Get-ChildItem -Path $stageDirectory -Recurse -Force -Directory
+
+foreach ($directory in $directories) {
+    $fullPath = (Resolve-Path $directory.FullName).Path
+
+    if (-not $fullPath.StartsWith($stageRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning "Directory path is not under stage directory: $($fullPath)"
+        continue
+    }
+
+    $relativePath = $fullPath.Substring($stageRoot.Length).TrimStart('\', '/')
+    $destinationPath = Join-Path $sandboxDirectory $relativePath
+    New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
+}
 
 # Get all FILES to copy (not directories), so progress can reach 100%.
 #
@@ -4127,6 +4275,65 @@ Write-Progress `
     -Status          "100% complete ($total/$total)" `
     -PercentComplete 100 `
     -Completed
+
+# A staged PostgreSQL cluster is valid only if its required empty directories
+# also reached the published sandbox.
+$stagedPostgresData = [System.IO.Path]::Combine($stageDirectory, "litellm", "data", "postgresql")
+$publishedPostgresData = [System.IO.Path]::Combine($sandboxDirectory, "litellm", "data", "postgresql")
+
+if (Test-Path -LiteralPath (Join-Path $stagedPostgresData "PG_VERSION")) {
+    $requiredPostgresDirectories = @(
+        "pg_commit_ts",
+        "pg_dynshmem",
+        "pg_notify",
+        "pg_replslot",
+        "pg_serial",
+        "pg_snapshots",
+        "pg_stat_tmp",
+        "pg_tblspc",
+        "pg_twophase"
+    )
+
+    $missingPostgresDirectories = @(
+        $requiredPostgresDirectories |
+            Where-Object { -not (Test-Path -LiteralPath (Join-Path $publishedPostgresData $_) -PathType Container) }
+    )
+
+    if ($missingPostgresDirectories.Count -gt 0) {
+        throw "Published PostgreSQL cluster is incomplete. Missing directories: $($missingPostgresDirectories -join ', ')."
+    }
+}
+
+$publishedRuntimeStatePath = [System.IO.Path]::Combine(
+    $sandboxDirectory,
+    "litellm",
+    "state",
+    "active-runtime.json")
+if (Test-Path -LiteralPath $publishedRuntimeStatePath) {
+    try {
+        $publishedRuntimeState = Get-Content -LiteralPath $publishedRuntimeStatePath -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "Published LiteLLM runtime state is invalid: $($_.Exception.Message)"
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$publishedRuntimeState.active)) {
+        throw "Published LiteLLM runtime state does not identify an active runtime."
+    }
+
+    $queryEngineName = if ($OperatingSystem -eq "Windows") { "query-engine.exe" } else { "query-engine" }
+    $publishedQueryEnginePath = [System.IO.Path]::Combine(
+        $sandboxDirectory,
+        "litellm",
+        "runtimes",
+        [string]$publishedRuntimeState.active,
+        "prisma",
+        $queryEngineName)
+
+    if (-not (Test-Path -LiteralPath $publishedQueryEnginePath -PathType Leaf)) {
+        throw "Published LiteLLM Prisma query engine is missing: $publishedQueryEnginePath"
+    }
+}
 
 # Ensure startup scripts are executable on Unix-like targets.
 #
@@ -4205,4 +4412,3 @@ Write-Host "   G4 Sandbox creation completed successfully"                -Foreg
 Write-Host "   Location: $($sandboxDirectory)"                            -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor DarkGray
 Write-Host ""
-
