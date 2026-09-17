@@ -1262,6 +1262,87 @@ function Get-GitHubBranchArchive {
 }
 
 # ---------------------------------------------------------------------------
+# Function: Get-GitRepositorySnapshot
+#
+# Purpose:
+#   Clones a single Git repository branch into the sandbox stage as a source
+#   snapshot, then removes Git history/metadata before publication.
+#
+# Description:
+#   - Requires git on PATH
+#   - Optionally removes the destination directory before cloning
+#   - Performs a shallow, single-branch clone
+#   - Removes the .git directory so the sandbox contains only source files
+# ---------------------------------------------------------------------------
+function Get-GitRepositorySnapshot {
+    [CmdletBinding()]
+    param(
+        # Git repository URL.
+        # Example: "https://github.com/g4-api/g4-services.git"
+        [string]$Url,
+
+        # Branch head to clone.
+        [string]$Branch = "main",
+
+        # Destination directory where the source snapshot will land.
+        [string]$DestinationDirectory,
+
+        # When specified, removes the destination directory before cloning.
+        [Switch]$Clean
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        throw "Repository URL was not provided."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($DestinationDirectory)) {
+        throw "Repository snapshot destination directory was not provided."
+    }
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        throw "Cannot clone repository snapshot because 'git' was not found on PATH."
+    }
+
+    if ($Clean -and (Test-Path -LiteralPath $DestinationDirectory)) {
+        Write-Host "Clean repository snapshot requested. Removing existing destination directory: '$($DestinationDirectory)'" -ForegroundColor DarkGray
+
+        $ProgressPreference = 'SilentlyContinue'
+        Remove-Item `
+            -LiteralPath $DestinationDirectory `
+            -Recurse `
+            -Force
+        $ProgressPreference = 'Continue'
+    }
+
+    $parentDirectory = Split-Path -Path $DestinationDirectory -Parent
+    New-Item -Path $parentDirectory -ItemType Directory -Force | Out-Null
+
+    Write-Host "Cloning repository snapshot '$($Url)' branch '$($Branch)' into: '$($DestinationDirectory)'" -ForegroundColor DarkGray
+
+    & $git.Source clone --depth 1 --branch $Branch --single-branch $Url $DestinationDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to clone repository snapshot '$($Url)' branch '$($Branch)' (exit code: $($LASTEXITCODE))."
+    }
+
+    $gitDirectory = Join-Path $DestinationDirectory ".git"
+    if (Test-Path -LiteralPath $gitDirectory) {
+        $ProgressPreference = 'SilentlyContinue'
+        Remove-Item `
+            -LiteralPath $gitDirectory `
+            -Recurse `
+            -Force
+        $ProgressPreference = 'Continue'
+    }
+
+    if (Test-Path -LiteralPath $gitDirectory) {
+        throw "Repository snapshot still contains Git metadata: '$($gitDirectory)'"
+    }
+
+    Write-Host "Repository snapshot completed. Destination directory: '$($DestinationDirectory)'" -ForegroundColor Cyan
+}
+
+# ---------------------------------------------------------------------------
 # Function: Get-NodeJs
 #
 # Purpose:
@@ -3821,6 +3902,46 @@ $archives = @(
     }
 )
 
+# Git repository snapshots to clone into the published sandbox.
+#
+# Notes:
+#   - Url: Git repository URL
+#   - Branch: branch head to clone (main only)
+#   - DestinationDirectory: source snapshot location under repos
+#   - Clean: remove and recreate the destination before cloning
+$repositorySnapshots = @(
+    @{
+        Url                  = "https://github.com/g4-api/uia-driver-server.git"
+        Branch               = "main"
+        DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "uia-driver-server"))
+        Clean                = $true
+    },
+    @{
+        Url                  = "https://github.com/g4-api/g4-vscode-extension.git"
+        Branch               = "main"
+        DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-vscode-extension"))
+        Clean                = $true
+    },
+    @{
+        Url                  = "https://github.com/g4-api/g4-recorders.git"
+        Branch               = "main"
+        DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-recorders"))
+        Clean                = $true
+    },
+    @{
+        Url                  = "https://github.com/g4-api/g4-services.git"
+        Branch               = "main"
+        DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-services"))
+        Clean                = $true
+    },
+    @{
+        Url                  = "https://github.com/g4-api/g4-plugins.git"
+        Branch               = "main"
+        DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-plugins"))
+        Clean                = $true
+    }
+)
+
 # VS Code extensions to pre-download as VSIX packages.
 #
 # Notes:
@@ -3983,6 +4104,18 @@ foreach ($archive in $archives) {
         -Branch               $archive.Branch `
         -ArchiveDirectory     $workDirectory `
         -DestinationDirectory $archive.DestinationDirectory
+}
+
+# Git Repository Snapshots
+foreach ($repositorySnapshot in $repositorySnapshots) {
+
+    # Clone a shallow main-branch snapshot and remove Git metadata before
+    # publication, so the sandbox carries source files only.
+    Get-GitRepositorySnapshot `
+        -Url                  $repositorySnapshot.Url `
+        -Branch               $repositorySnapshot.Branch `
+        -DestinationDirectory $repositorySnapshot.DestinationDirectory `
+        -Clean:($repositorySnapshot.Clean)
 }
 
 # VSIX Extensions (Offline Packaging)
