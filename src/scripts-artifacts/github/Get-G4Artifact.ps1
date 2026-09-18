@@ -283,6 +283,6 @@ foreach ($tool in $Tools) {
         -DestinationDirectory $tool.DestinationDirectory `
         -DestinationFile      $tool.DestinationFile `
         -GitHubRepository     $tool.GitHubRepository `
-        -Tag                  $tool.Tag `
+        -Tag                  $tool['Tag'] `
         -Token                $Token
 }
