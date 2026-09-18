@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
-# Installs or upgrades the bundled G4 extension, then launches bundled VS Code.
+# Installs or upgrades every bundled VS Code extension, then launches bundled VS Code.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-extension_id="g4-api.g4-engine-client"
 vs_code_cli="$SCRIPT_DIR/bot-utilities/vs-code/bin/code"
 vs_code_exe="$SCRIPT_DIR/bot-utilities/vs-code/code"
 vsix_dir="$SCRIPT_DIR/bot-utilities/vsixs"
 
-# Reads the authoritative version from the package manifest inside a VSIX.
-read_vsix_version() {
+# Reads "<publisher>.<name>@<version>" from the package manifest inside a VSIX.
+read_vsix_manifest() {
     local vsix_file="$1"
+    local entry
+    local publisher
+    local name
     local version
 
     if command -v unzip >/dev/null 2>&1; then
-        version="$(unzip -p "$vsix_file" extension/package.json 2>/dev/null \
-            | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-            | head -n 1 || true)"
+        entry="$(unzip -p "$vsix_file" extension/package.json 2>/dev/null || true)"
 
-        if [[ -n "$version" ]]; then
-            printf '%s\n' "$version"
+        publisher="$(printf '%s\n' "$entry" | sed -n 's/.*"publisher"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+        name="$(printf '%s\n' "$entry" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+        version="$(printf '%s\n' "$entry" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+
+        if [[ -n "$publisher" && -n "$name" && -n "$version" ]]; then
+            printf '%s.%s@%s\n' "$publisher" "$name" "$version"
             return
         fi
     fi
@@ -33,7 +37,8 @@ import zipfile
 
 with zipfile.ZipFile(sys.argv[1]) as archive:
     with archive.open("extension/package.json") as package:
-        print(json.load(package)["version"])
+        manifest = json.load(package)
+        print(manifest["publisher"] + "." + manifest["name"] + "@" + manifest["version"])
 PYTHON
     fi
 }
@@ -77,12 +82,19 @@ version_is_newer() {
 }
 
 if [[ -x "$vs_code_cli" ]]; then
-    vsix_file="$(find "$vsix_dir" -maxdepth 1 -type f -name "${extension_id}*.vsix" 2>/dev/null | sort -Vr | head -n 1 || true)"
+    while IFS= read -r vsix_file; do
+        [[ -n "$vsix_file" ]] || continue
 
-    if [[ -n "$vsix_file" ]]; then
-        installed_entry="$("$vs_code_cli" --list-extensions --show-versions 2>/dev/null | grep -i "^${extension_id}@" | head -n 1 || true)"
+        manifest_entry="$(read_vsix_manifest "$vsix_file" || true)"
+        if [[ -z "$manifest_entry" ]]; then
+            echo "Could not read the bundled extension manifest from '$vsix_file'." >&2
+            continue
+        fi
+
+        bundled_id="${manifest_entry%@*}"
+        bundled_version="${manifest_entry#*@}"
+        installed_entry="$("$vs_code_cli" --list-extensions --show-versions 2>/dev/null | grep -i "^${bundled_id}@" | head -n 1 || true)"
         installed_version="${installed_entry#*@}"
-        bundled_version="$(read_vsix_version "$vsix_file" || true)"
         install_extension=false
 
         if [[ -z "$installed_entry" ]]; then
@@ -104,9 +116,7 @@ if [[ -x "$vs_code_cli" ]]; then
             "$vs_code_cli" --install-extension "$vsix_file" \
                 || echo "Failed to install VS Code extension: $vsix_file" >&2
         fi
-    else
-        echo "VSIX file was not found: $vsix_dir/${extension_id}*.vsix" >&2
-    fi
+    done < <(find "$vsix_dir" -maxdepth 1 -type f -name "*.vsix" 2>/dev/null | sort || true)
 else
     echo "Bundled VS Code CLI was not found or is not executable: $vs_code_cli" >&2
 fi

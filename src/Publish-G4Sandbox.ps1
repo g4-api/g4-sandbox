@@ -10,7 +10,7 @@
 #   - Orchestrates the end-to-end sandbox build process
 #   - Delegates every deployment block to a standalone, self-contained
 #     script under 'scripts-artifacts' (browsers/, runtimes/, ide/,
-#     github/, git/, ai-agents/)
+#     github/, ai-agents/)
 #   - Each standalone script owns its own parameters and duplicates any
 #     shared helper functions it needs; this script only calls them with
 #     the relevant parameters
@@ -291,7 +291,10 @@ if ($testWrightAssetPattern) {
     }
 }
 
-# Branch-archive sources to download (GitHub source zips, not release assets).
+# Branch-archive sources to download from GitHub. This single mechanism serves
+# both the source archive (g4-pytest-wrapper) and the repository working-tree
+# snapshots for the published sandbox: each entry is downloaded as a GitHub
+# branch source zip, extracted, and flattened into its destination directory.
 #
 # Notes:
 #   - Repository: GitHub '<owner>/<repo>'
@@ -304,46 +307,36 @@ $archives = @(
         Branch               = "main"
         DestinationDirectory = (Join-Path $utilitiesDirectory "g4-pytest-wrapper")
         WindowsOnly          = $false
-    }
-)
-
-# Git repository snapshots to clone into the published sandbox.
-#
-# Notes:
-#   - Url: Git repository URL
-#   - Branch: branch head to clone (main only)
-#   - DestinationDirectory: source snapshot location under repos
-#   - Clean: remove and recreate the destination before cloning
-$repositorySnapshots = @(
+    },
     @{
-        Url                  = "https://github.com/g4-api/uia-driver-server.git"
+        Repository           = "g4-api/uia-driver-server"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "uia-driver-server"))
-        Clean                = $true
+        WindowsOnly          = $false
     },
     @{
-        Url                  = "https://github.com/g4-api/g4-vscode-extension.git"
+        Repository           = "g4-api/g4-vscode-extension"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-vscode-extension"))
-        Clean                = $true
+        WindowsOnly          = $false
     },
     @{
-        Url                  = "https://github.com/g4-api/g4-recorders.git"
+        Repository           = "g4-api/g4-recorders"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-recorders"))
-        Clean                = $true
+        WindowsOnly          = $false
     },
     @{
-        Url                  = "https://github.com/g4-api/g4-services.git"
+        Repository           = "g4-api/g4-services"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-services"))
-        Clean                = $true
+        WindowsOnly          = $false
     },
     @{
-        Url                  = "https://github.com/g4-api/g4-plugins.git"
+        Repository           = "g4-api/g4-plugins"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-plugins"))
-        Clean                = $true
+        WindowsOnly          = $false
     }
 )
 
@@ -486,26 +479,17 @@ if ($OperatingSystem -eq "Windows") {
     -OperatingSystem      $OperatingSystem `
     @tokenParameters
 
-# GitHub Branch Archives
+# GitHub Branch Archives and Repository Snapshots
 #
 # Notes:
-#   - Delegated to scripts-artifacts/github/Get-GitHubBranchArchive.ps1, which
-#     accepts the whole $archives array and loops internally
+#   - Both the plain source archives and the repository working-tree snapshots
+#     are downloaded as GitHub branch source zips by
+#     scripts-artifacts/github/Get-GitHubBranchArchive.ps1, which accepts the
+#     whole $archives array and loops internally
 & (Join-Path $scriptsArtifactsDirectory "github\Get-GitHubBranchArchive.ps1") `
     -Archives             $archives `
     -ArchiveDirectory     $workDirectory `
     -OperatingSystem      $OperatingSystem `
-    @tokenParameters
-
-# Git Repository Snapshots
-#
-# Notes:
-#   - Delegated to scripts-artifacts/git/Get-GitRepositorySnapshot.ps1, which
-#     accepts the whole $repositorySnapshots array and loops internally; each
-#     shallow clone removes Git metadata before publication so the sandbox
-#     carries source files only
-& (Join-Path $scriptsArtifactsDirectory "git\Get-GitRepositorySnapshot.ps1") `
-    -Snapshots            $repositorySnapshots `
     @tokenParameters
 
 # VSIX Extensions (Offline Packaging)
