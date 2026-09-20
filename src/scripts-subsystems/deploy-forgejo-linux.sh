@@ -83,7 +83,8 @@
 #     FORGEJO_USER           Runtime account that owns the data and runs the
 #                            processes (default: the account that invoked sudo;
 #                            no OS account is created)
-#     FORGEJO_IP             Advertised LAN IPv4        (default: auto-detected)*
+#     FORGEJO_IP             Advertised LAN IPv4        (default: 127.0.0.1 loopback,)*
+#                                                        portable to any host
 #     FORGEJO_HTTP_PORT      Web interface port         (default: 3000)*
 #     FORGEJO_SSH_PORT       Built-in Git SSH port      (default: 2222)*
 #     FORGEJO_ADMIN_USER     Initial administrator      (default: g4-admin)*
@@ -223,7 +224,7 @@ main() {
         exit 1
     fi
 
-    for command_name in curl sha256sum git install runuser ip awk grep sed head pgrep pkill tail; do
+    for command_name in curl sha256sum git install runuser awk grep sed head pgrep pkill tail; do
         if ! command -v "$command_name" >/dev/null 2>&1; then
             echo "Required command is missing: $command_name" >&2
             exit 1
@@ -270,19 +271,9 @@ main() {
         exit 1
     fi
 
-    if [[ -n "${FORGEJO_IP:-}" ]]; then
-        LAN_IP="$FORGEJO_IP"
-    else
-        LAN_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')"
-        if [[ -z "$LAN_IP" ]]; then
-            LAN_IP="$(hostname -I | awk '{print $1}')"
-        fi
-    fi
-
-    if [[ -z "$LAN_IP" ]]; then
-        echo "Could not determine a LAN IPv4 address. Re-run with FORGEJO_IP=x.x.x.x." >&2
-        exit 1
-    fi
+    # Advertised address. Loopback by default so the box is relocatable and the
+    # published sandbox works unchanged on any host; override for LAN visibility.
+    LAN_IP="${FORGEJO_IP:-127.0.0.1}"
 
     # The boxed model: no systemd unit and no service account. A running server or
     # runner is detected directly and must be stopped before installing.
@@ -372,17 +363,16 @@ main() {
 APP_NAME = Forgejo
 RUN_USER = $FORGEJO_USER
 RUN_MODE = prod
-WORK_PATH = $FORGEJO_ROOT
 
 [repository]
-ROOT = $DATA_DIR/repositories
+ROOT = data/repositories
 
 [server]
 DOMAIN = $LAN_IP
 HTTP_ADDR = 0.0.0.0
 HTTP_PORT = $HTTP_PORT
 ROOT_URL = http://$LAN_IP:$HTTP_PORT/
-APP_DATA_PATH = $DATA_DIR
+APP_DATA_PATH = data
 LFS_START_SERVER = true
 OFFLINE_MODE = true
 START_SSH_SERVER = true
@@ -394,7 +384,7 @@ BUILTIN_SSH_SERVER_USER = $FORGEJO_USER
 
 [database]
 DB_TYPE = sqlite3
-PATH = $DB_PATH
+PATH = data/forgejo.db
 
 [security]
 INSTALL_LOCK = true
@@ -416,7 +406,7 @@ JWT_SECRET = $OAUTH2_JWT_SECRET
 [log]
 MODE = console,file
 LEVEL = Info
-ROOT_PATH = $LOG_DIR
+ROOT_PATH = log
 EOF
 
         install -o "$FORGEJO_USER" -g "$FORGEJO_USER" -m 0640 "$CONFIG_TMP" "$CONFIG_PATH"
@@ -670,7 +660,7 @@ log:
   level: info
 
 runner:
-  file: $RUNNER_IDENTITY
+  file: runner/.runner
   capacity: 1
   timeout: 3h
   labels:
@@ -742,16 +732,23 @@ EOF
 set -Eeuo pipefail
 
 RUN_USER="__RUN_USER__"
-FORGEJO_ROOT="__FORGEJO_ROOT__"
-BIN_PATH="__BIN_PATH__"
-CONFIG_PATH="__CONFIG_PATH__"
-SERVER_PID_FILE="__SERVER_PID_FILE__"
-SERVER_LOG_FILE="__SERVER_LOG_FILE__"
-HEALTH_URL="__HEALTH_URL__"
-RUNNER_BIN="__RUNNER_BIN__"
-RUNNER_CONFIG_FILE="__RUNNER_CONFIG_FILE__"
-RUNNER_PID_FILE="__RUNNER_PID_FILE__"
-RUNNER_LOG="__RUNNER_LOG__"
+HTTP_PORT="__HTTP_PORT__"
+
+# The box is relocatable: every path below is derived from this launcher's own
+# location, so the published sandbox works unchanged from any directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORGEJO_ROOT="$(cd "$SCRIPT_DIR" && pwd)"
+BIN_PATH="$FORGEJO_ROOT/bin/forgejo"
+CONFIG_PATH="$FORGEJO_ROOT/app.ini"
+SERVER_PID_FILE="$FORGEJO_ROOT/run/forgejo.pid"
+SERVER_LOG_FILE="$FORGEJO_ROOT/run/forgejo.log"
+HEALTH_URL="http://127.0.0.1:$HTTP_PORT/api/healthz"
+RUNNER_BIN="$FORGEJO_ROOT/bin/forgejo-runner"
+RUNNER_CONFIG_FILE="$FORGEJO_ROOT/runner/config.yml"
+RUNNER_PID_FILE="$FORGEJO_ROOT/run/forgejo-runner.pid"
+RUNNER_LOG="$FORGEJO_ROOT/run/forgejo-runner.log"
+
+cd "$FORGEJO_ROOT"
 
 server_is_running() {
     local server_pid
@@ -874,16 +871,6 @@ echo "Web: http://127.0.0.1:__HTTP_PORT__/"
 EOF_START_LAUNCHER
 
     sed -e "s|__RUN_USER__|$FORGEJO_USER|g" \
-        -e "s|__FORGEJO_ROOT__|$FORGEJO_ROOT|g" \
-        -e "s|__BIN_PATH__|$BIN_PATH|g" \
-        -e "s|__CONFIG_PATH__|$CONFIG_PATH|g" \
-        -e "s|__SERVER_PID_FILE__|$SERVER_PID_FILE|g" \
-        -e "s|__SERVER_LOG_FILE__|$SERVER_LOG_FILE|g" \
-        -e "s|__HEALTH_URL__|$HEALTH_URL|g" \
-        -e "s|__RUNNER_BIN__|$RUNNER_BIN|g" \
-        -e "s|__RUNNER_CONFIG_FILE__|$RUNNER_CONFIG_FILE|g" \
-        -e "s|__RUNNER_PID_FILE__|$RUNNER_PID_FILE|g" \
-        -e "s|__RUNNER_LOG__|$RUNNER_LOG|g" \
         -e "s|__HTTP_PORT__|$HTTP_PORT|g" \
         "$START_SCRIPT_TMP" >"$FORGEJO_ROOT/start-forgejo.sh"
     chmod 0755 "$FORGEJO_ROOT/start-forgejo.sh"
@@ -913,10 +900,17 @@ EOF_START_LAUNCHER
 set -Eeuo pipefail
 
 RUN_USER="__RUN_USER__"
-BIN_PATH="__BIN_PATH__"
-SERVER_PID_FILE="__SERVER_PID_FILE__"
-RUNNER_BIN="__RUNNER_BIN__"
-RUNNER_PID_FILE="__RUNNER_PID_FILE__"
+
+# The box is relocatable: every path below is derived from this launcher's own
+# location, so the published sandbox works unchanged from any directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORGEJO_ROOT="$(cd "$SCRIPT_DIR" && pwd)"
+BIN_PATH="$FORGEJO_ROOT/bin/forgejo"
+SERVER_PID_FILE="$FORGEJO_ROOT/run/forgejo.pid"
+RUNNER_BIN="$FORGEJO_ROOT/bin/forgejo-runner"
+RUNNER_PID_FILE="$FORGEJO_ROOT/run/forgejo-runner.pid"
+
+cd "$FORGEJO_ROOT"
 
 as_owner() {
     if [[ "${EUID}" -eq 0 ]]; then
@@ -971,10 +965,6 @@ echo "Forgejo and its local runner are stopped."
 EOF_STOP_LAUNCHER
 
     sed -e "s|__RUN_USER__|$FORGEJO_USER|g" \
-        -e "s|__BIN_PATH__|$BIN_PATH|g" \
-        -e "s|__SERVER_PID_FILE__|$SERVER_PID_FILE|g" \
-        -e "s|__RUNNER_BIN__|$RUNNER_BIN|g" \
-        -e "s|__RUNNER_PID_FILE__|$RUNNER_PID_FILE|g" \
         "$STOP_SCRIPT_TMP" >"$FORGEJO_ROOT/stop-forgejo.sh"
     chmod 0755 "$FORGEJO_ROOT/stop-forgejo.sh"
     chown "$FORGEJO_USER:$FORGEJO_USER" "$FORGEJO_ROOT/stop-forgejo.sh"

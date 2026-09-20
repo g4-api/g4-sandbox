@@ -10,7 +10,7 @@
 #   - Orchestrates the end-to-end sandbox build process
 #   - Delegates every deployment block to a standalone, self-contained
 #     script under 'scripts-artifacts' (browsers/, runtimes/, ide/,
-#     github/, git/, ai-agents/)
+#     github/, ai-agents/)
 #   - Each standalone script owns its own parameters and duplicates any
 #     shared helper functions it needs; this script only calls them with
 #     the relevant parameters
@@ -89,7 +89,19 @@ param(
     #   - The sandbox is published without the 'litellm' box
     #   - start-litellm.cmd / start-litellm.sh remain in the sandbox root but
     #     will report that the subsystem is missing
-    [switch]$SkipLiteLLM
+    [switch]$SkipLiteLLM,
+
+    # When specified, skips the source-control server subsystem deployment.
+    #
+    # Notes:
+    #   - The sandbox is published without the source-control 'box' for the
+    #     target OS (gitea on Windows, forgejo on Linux)
+    #   - start-gitea.cmd / stop-gitea.cmd (Windows) or start-forgejo.sh /
+    #     stop-forgejo.sh (Linux) remain in the sandbox root but will report
+    #     that the subsystem is missing
+    #   - macOS has no source-control box yet; deployment is always skipped and
+    #     downloading the portable runtime (Windows only) is unaffected
+    [switch]$SkipScm
 )
 
 # Enable strict mode for safer scripting.
@@ -291,7 +303,10 @@ if ($testWrightAssetPattern) {
     }
 }
 
-# Branch-archive sources to download (GitHub source zips, not release assets).
+# Branch-archive sources to download from GitHub. This single mechanism serves
+# both the source archive (g4-pytest-wrapper) and the repository working-tree
+# snapshots for the published sandbox: each entry is downloaded as a GitHub
+# branch source zip, extracted, and flattened into its destination directory.
 #
 # Notes:
 #   - Repository: GitHub '<owner>/<repo>'
@@ -304,46 +319,36 @@ $archives = @(
         Branch               = "main"
         DestinationDirectory = (Join-Path $utilitiesDirectory "g4-pytest-wrapper")
         WindowsOnly          = $false
-    }
-)
-
-# Git repository snapshots to clone into the published sandbox.
-#
-# Notes:
-#   - Url: Git repository URL
-#   - Branch: branch head to clone (main only)
-#   - DestinationDirectory: source snapshot location under repos
-#   - Clean: remove and recreate the destination before cloning
-$repositorySnapshots = @(
+    },
     @{
-        Url                  = "https://github.com/g4-api/uia-driver-server.git"
+        Repository           = "g4-api/uia-driver-server"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "uia-driver-server"))
-        Clean                = $true
+        WindowsOnly          = $false
     },
     @{
-        Url                  = "https://github.com/g4-api/g4-vscode-extension.git"
+        Repository           = "g4-api/g4-vscode-extension"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-vscode-extension"))
-        Clean                = $true
+        WindowsOnly          = $false
     },
     @{
-        Url                  = "https://github.com/g4-api/g4-recorders.git"
+        Repository           = "g4-api/g4-recorders"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-recorders"))
-        Clean                = $true
+        WindowsOnly          = $false
     },
     @{
-        Url                  = "https://github.com/g4-api/g4-services.git"
+        Repository           = "g4-api/g4-services"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-services"))
-        Clean                = $true
+        WindowsOnly          = $false
     },
     @{
-        Url                  = "https://github.com/g4-api/g4-plugins.git"
+        Repository           = "g4-api/g4-plugins"
         Branch               = "main"
         DestinationDirectory = ([System.IO.Path]::Combine($stageDirectory, "repos", "g4-plugins"))
-        Clean                = $true
+        WindowsOnly          = $false
     }
 )
 
@@ -442,6 +447,19 @@ if (-not (Test-Path -LiteralPath $driverExecutablePath -PathType Leaf)) {
     -DestinationDirectory (Join-Path $runtimeDirectory "nodejs") `
     -Clean
 
+# Download the portable Git for Windows runtime (Windows target only).
+#
+# Notes:
+#   - MinGit supplies git.exe to the source-control box and any tool that needs
+#     a bundled Git; the Linux/macOS provider script has not been added yet and
+#     the resolver warns and skips for those targets
+#   - Staged under 'runtime\git' so the published box can prepend its cmd\ folder
+& (Join-Path $scriptsArtifactsDirectory "runtimes\Get-MinGit.ps1") `
+    -OperatingSystem      $OperatingSystem `
+    -ArchiveDirectory     $workDirectory `
+    -DestinationDirectory (Join-Path $runtimeDirectory "git") `
+    -Clean
+
 # Download VS Code portable build.
 & (Join-Path $scriptsArtifactsDirectory "ide\Get-VSCode.ps1") `
     -OperatingSystem      $OperatingSystem `
@@ -486,26 +504,17 @@ if ($OperatingSystem -eq "Windows") {
     -OperatingSystem      $OperatingSystem `
     @tokenParameters
 
-# GitHub Branch Archives
+# GitHub Branch Archives and Repository Snapshots
 #
 # Notes:
-#   - Delegated to scripts-artifacts/github/Get-GitHubBranchArchive.ps1, which
-#     accepts the whole $archives array and loops internally
+#   - Both the plain source archives and the repository working-tree snapshots
+#     are downloaded as GitHub branch source zips by
+#     scripts-artifacts/github/Get-GitHubBranchArchive.ps1, which accepts the
+#     whole $archives array and loops internally
 & (Join-Path $scriptsArtifactsDirectory "github\Get-GitHubBranchArchive.ps1") `
     -Archives             $archives `
     -ArchiveDirectory     $workDirectory `
     -OperatingSystem      $OperatingSystem `
-    @tokenParameters
-
-# Git Repository Snapshots
-#
-# Notes:
-#   - Delegated to scripts-artifacts/git/Get-GitRepositorySnapshot.ps1, which
-#     accepts the whole $repositorySnapshots array and loops internally; each
-#     shallow clone removes Git metadata before publication so the sandbox
-#     carries source files only
-& (Join-Path $scriptsArtifactsDirectory "git\Get-GitRepositorySnapshot.ps1") `
-    -Snapshots            $repositorySnapshots `
     @tokenParameters
 
 # VSIX Extensions (Offline Packaging)
@@ -716,6 +725,134 @@ else {
             }
             catch {
                 Write-Warning "LiteLLM subsystem deployment failed: $($_.Exception.Message). Continuing without LiteLLM."
+            }
+            finally {
+                Set-StrictMode -Version Latest
+                $ErrorActionPreference = $previousErrorActionPreference
+            }
+        }
+    }
+}
+
+# Deploy the portable source-control subsystem into the stage.
+#
+# Notes:
+#   - The target box is selected from the publish OS: gitea on Windows, forgejo
+#     on Linux; any other platform is skipped as unsupported.
+#   - Windows Git for the Gitea box is provided by the bundled MinGit runtime;
+#     the Forgejo box bundles its own Git binary and has no runtime dependency.
+#   - Failures are non-fatal and only warn.
+if ($SkipScm) {
+    Write-Host "Skipping the source-control subsystem deployment (-SkipScm)." -ForegroundColor DarkGray
+}
+else {
+    switch ($OperatingSystem.ToLowerInvariant()) {
+        'windows' {
+            $scmBoxName = 'gitea'
+            $deployScriptName = 'deploy-gitea-win.ps1'
+        }
+        'linux' {
+            $scmBoxName = 'forgejo'
+            $deployScriptName = 'deploy-forgejo-linux.sh'
+        }
+        default {
+            $scmBoxName = $null
+            $deployScriptName = $null
+        }
+    }
+
+    # Unsupported platforms (for example MacOs) are skipped, not failed.
+    if ([string]::IsNullOrWhiteSpace($deployScriptName)) {
+        Write-Warning "Source-control subsystem: unsupported operating system '$($OperatingSystem)'. Skipping deployment."
+    }
+    else {
+        $deployScriptPath = Join-Path (Join-Path $sourceDirectory "scripts-subsystems") $deployScriptName
+
+        # The deployment scripts are part of the repository; a missing file is a
+        # packaging problem, but must not abort an otherwise valid publish.
+        if (-not (Test-Path -LiteralPath $deployScriptPath)) {
+            Write-Warning "Source-control subsystem: deployment script '$($deployScriptPath)' was not found. Skipping deployment."
+        }
+        else {
+            # The source-control box lives in the sandbox root so the generated
+            # start/stop launchers sit beside the root launchers.
+            $boxRoot = Join-Path $stageDirectory $scmBoxName
+            New-Item -ItemType Directory -Path $boxRoot -Force | Out-Null
+
+            Write-Host "Deploying the portable source-control box '$scmBoxName' into '$($boxRoot)'..." -ForegroundColor DarkGray
+
+            # As with the LiteLLM box the deployment scripts are standalone
+            # programs with their own error handling. Relax both settings for
+            # the duration of the call, then restore them.
+            $previousErrorActionPreference = $ErrorActionPreference
+            try {
+                Set-StrictMode -Off
+                $ErrorActionPreference = 'Continue'
+
+                if ($scmBoxName -eq 'gitea') {
+                    # Git is mandatory for Gitea; git.exe is resolved from the
+                    # bundled MinGit runtime (staged under runtime\git), then from
+                    # the host PATH as a fallback.
+                    $gitRoot = Join-Path $runtimeDirectory 'git'
+                    & $deployScriptPath -InstallRoot $boxRoot -GitRoot $gitRoot
+                }
+                else {
+                    # Forgejo is deployed by a bash script. FORGEJO_ROOT directs
+                    # it into the stage; FORGEJO_IP is fixed to the loopback so
+                    # the relocated sandbox works unchanged on any host.
+                    $isRoot = ((& id -u 2>$null) -eq 0)
+                    $deployArgs = @('env', "FORGEJO_ROOT=$boxRoot", 'FORGEJO_IP=127.0.0.1', 'bash', $deployScriptPath)
+                    if ($isRoot) {
+                        & $deployArgs
+                    }
+                    else {
+                        & sudo @deployArgs
+                    }
+                }
+
+                # Validate the deployed box before trusting the stage copy.
+                #
+                # Notes:
+                #   - The Windows scripts run in-process, so $LASTEXITCODE is not
+                #     a reliable success signal there (native calls are checked
+                #     via the generated stop launcher below instead).
+                #   - File checks below remain valid on both platforms.
+                $expectedBoxFiles = if ($scmBoxName -eq 'gitea') {
+                    @('gitea.exe', 'data\gitea.db', 'start-gitea.cmd', 'stop-gitea.cmd')
+                }
+                else {
+                    @('bin\forgejo', 'data\forgejo.db', 'start-forgejo.sh', 'stop-forgejo.sh')
+                }
+
+                $missingBoxFile = $expectedBoxFiles |
+                    Where-Object { -not (Test-Path -LiteralPath (Join-Path $boxRoot $_)) } |
+                    Select-Object -First 1
+
+                if ($missingBoxFile) {
+                    throw "'$scmBoxName' box validation failed: '$missingBoxFile' was not created."
+                }
+
+                # Stop the detached server and runner so the staged box can be
+                # safely copied to the final sandbox location.
+                if ($scmBoxName -eq 'gitea') {
+                    & (Join-Path $boxRoot 'stop-gitea.ps1')
+                }
+                else {
+                    if ($isRoot) {
+                        & bash (Join-Path $boxRoot 'stop-forgejo.sh')
+                    }
+                    else {
+                        & sudo bash (Join-Path $boxRoot 'stop-forgejo.sh')
+                    }
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "'stop-forgejo.sh' exited with code $($LASTEXITCODE)."
+                    }
+                }
+
+                Write-Host "Source-control box '$scmBoxName' deployed successfully." -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "Source-control subsystem deployment failed: $($_.Exception.Message). Continuing without $scmBoxName."
             }
             finally {
                 Set-StrictMode -Version Latest

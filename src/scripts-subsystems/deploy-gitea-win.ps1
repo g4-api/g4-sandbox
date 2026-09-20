@@ -24,7 +24,9 @@
     portable and contained, but host-mode workflow code is not sandboxed.
 
     The installer does not create a Windows service, scheduled task, registry
-    entry or firewall rule. Git for Windows must already be available on PATH.
+    entry or firewall rule. Git for Windows must already be available on PATH, or
+    the bundled portable Git must be supplied with -GitRoot (a directory that
+    contains a MinGit cmd\git.exe).
 
 .EXAMPLE
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-gitea-portable-windows.ps1
@@ -63,7 +65,11 @@ param(
 
     [Parameter()]
     [ValidateRange(1, 65535)]
-    [int]$HttpPort = 3000
+    [int]$HttpPort = 3000,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$GitRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -222,7 +228,10 @@ function Get-LastValueLine {
 }
 
 function Set-PortableEnvironment {
-    param([Parameter(Mandatory)][string]$Root)
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter()][string]$GitRoot
+    )
 
     $env:GITEA_WORK_DIR = $Root
     $env:GITEA_CUSTOM = Join-Path $Root 'custom'
@@ -236,6 +245,12 @@ function Set-PortableEnvironment {
     $env:XDG_CACHE_HOME = Join-Path $Root 'home\.cache'
     $env:XDG_DATA_HOME = Join-Path $Root 'home\.local\share'
     $env:GIT_CONFIG_GLOBAL = Join-Path $Root 'home\.gitconfig'
+
+    # Prepend a bundled portable Git so repository operations and Actions jobs resolve
+    # git.exe regardless of the host PATH. Absent -GitRoot leaves PATH untouched.
+    if (-not [string]::IsNullOrWhiteSpace($GitRoot)) {
+        $env:PATH = "$(Join-Path $GitRoot 'cmd');$env:PATH"
+    }
 }
 
 function Restore-Environment {
@@ -285,8 +300,17 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 }
 
 $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
+
+if (-not [string]::IsNullOrWhiteSpace($GitRoot)) {
+    $bundledGitExe = Join-Path $GitRoot 'cmd\git.exe'
+    if (-not (Test-Path -LiteralPath $bundledGitExe)) {
+        throw "The provided -GitRoot '$GitRoot' does not contain cmd\git.exe."
+    }
+    $gitCommand = Get-Item -LiteralPath $bundledGitExe
+}
+
 if (-not $gitCommand) {
-    throw 'Git for Windows was not found on PATH. Install Git for Windows first.'
+    throw 'Git for Windows was not found on PATH. Install Git for Windows first or provide -GitRoot.'
 }
 
 $resolvedRoot = [IO.Path]::GetFullPath($InstallRoot)
@@ -344,7 +368,7 @@ foreach ($directory in $directories) {
 $portableEnvironmentNames = @(
     'GITEA_WORK_DIR', 'GITEA_CUSTOM', 'HOME', 'USERPROFILE', 'APPDATA',
     'LOCALAPPDATA', 'TEMP', 'TMP', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME',
-    'XDG_DATA_HOME', 'GIT_CONFIG_GLOBAL'
+    'XDG_DATA_HOME', 'GIT_CONFIG_GLOBAL', 'PATH'
 )
 $originalPortableEnvironment = @{}
 
@@ -353,7 +377,7 @@ foreach ($name in $portableEnvironmentNames) {
     $originalPortableEnvironment[$name] = if ($item) { $item.Value } else { $null }
 }
 
-Set-PortableEnvironment -Root $resolvedRoot
+Set-PortableEnvironment -Root $resolvedRoot -GitRoot $GitRoot
 
 try {
 
@@ -578,6 +602,14 @@ $env:XDG_CONFIG_HOME = Join-Path $Root 'home\.config'
 $env:XDG_CACHE_HOME = Join-Path $Root 'home\.cache'
 $env:XDG_DATA_HOME = Join-Path $Root 'home\.local\share'
 $env:GIT_CONFIG_GLOBAL = Join-Path $Root 'home\.gitconfig'
+
+# Put the sandbox-bundled portable Git (runtime\git) ahead of PATH so repository and
+# Actions operations never depend on a host-installed Git for Windows. Falls back to
+# host Git silently when the box runs standalone without runtime\git nearby.
+$PortableGitBin = Join-Path $Root '..\runtime\git\cmd'
+if (Test-Path -LiteralPath $PortableGitBin) {
+    $env:PATH = "$PortableGitBin;$env:PATH"
+}
 
 $GiteaPath = [IO.Path]::GetFullPath($GiteaExe)
 $RunnerPath = [IO.Path]::GetFullPath($RunnerExe)

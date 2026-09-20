@@ -209,6 +209,18 @@ else {
     $ProgressPreference = 'Continue'
 }
 
+# Enable VS Code portable mode by creating an empty 'data' directory at the
+# same level as the code/code.exe launcher.
+#
+# Notes:
+#   - The 'data' folder is the documented VS Code portable-mode marker
+#   - When present, VS Code stores user settings, extensions, and workspace
+#     state under this local folder instead of the machine-level user profile
+#   - Created after extraction/flattening so it always lands at the root
+$dataDirectory = Join-Path -Path $DestinationDirectory -ChildPath "data"
+New-Item -Path $dataDirectory -ItemType Directory -Force | Out-Null
+
+Write-Host "Created VS Code local data directory: '$($dataDirectory)'" -ForegroundColor DarkGray
 Write-Host "VS Code deployed successfully."         -ForegroundColor Cyan
 Write-Host "Version:      $($resolvedVersion)"      -ForegroundColor DarkGray
 Write-Host "Platform:     $($platformId)"           -ForegroundColor DarkGray
