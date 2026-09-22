@@ -142,7 +142,16 @@
 
 .PARAMETER LiteLLMMasterKey
     LiteLLM master key. Passed through the LITELLM_MASTER_KEY environment variable, not written
-    into config.yaml, so it takes effect without editing the user-owned config.
+    into config.yaml, so it takes effect without editing the user-owned config. Acts as a fallback
+    for the admin UI password when LiteLLMAdminPassword is not used. Default is sk-12345.
+
+.PARAMETER LiteLLMAdminUser
+    Username for the LiteLLM admin UI login. Passed through the UI_USERNAME environment variable.
+    Default is g4-admin.
+
+.PARAMETER LiteLLMAdminPassword
+    Password for the LiteLLM admin UI login. Passed through the UI_PASSWORD environment variable.
+    Default is sk-12345.
 
 .PARAMETER StoreModelInDb
     When $true (default) sets STORE_MODEL_IN_DB=True so models can be added and edited from the
@@ -298,7 +307,15 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$LiteLLMMasterKey = 'sk-1234',
+    [string]$LiteLLMMasterKey = 'sk-12345',
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$LiteLLMAdminUser = 'g4-admin',
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$LiteLLMAdminPassword = 'sk-12345',
 
     [Parameter()]
     [bool]$StoreModelInDb = $true,
@@ -797,6 +814,8 @@ function New-PortableContext {
         LiteLLMHostAddress       = $LiteLLMHostAddress
         LiteLLMPort              = $LiteLLMPort
         LiteLLMMasterKey         = $LiteLLMMasterKey
+        LiteLLMAdminUser         = $LiteLLMAdminUser
+        LiteLLMAdminPassword     = $LiteLLMAdminPassword
         StoreModelInDb           = $StoreModelInDb
         UpstreamModel            = $UpstreamModel
         UpstreamApiBase          = $UpstreamApiBase
@@ -909,6 +928,8 @@ function Set-PortableProcessEnvironment {
     $env:LITELLM_HOST = $Context.LiteLLMHostAddress
     $env:LITELLM_PORT = [string]$Context.LiteLLMPort
     $env:LITELLM_MASTER_KEY = $Context.LiteLLMMasterKey
+    $env:UI_USERNAME = $Context.LiteLLMAdminUser
+    $env:UI_PASSWORD = $Context.LiteLLMAdminPassword
     $env:LITELLM_DISABLE_NO_REDIS_WARNING = 'true'
 
     if ($Context.StoreModelInDb) {
@@ -1705,6 +1726,12 @@ function New-PortableRuntimeContext {
         [string]$LiteLLMMasterKey,
 
         [Parameter(Mandatory = $true)]
+        [string]$LiteLLMAdminUser,
+
+        [Parameter(Mandatory = $true)]
+        [string]$LiteLLMAdminPassword,
+
+        [Parameter(Mandatory = $true)]
         [bool]$StoreModelInDb
     )
 
@@ -1785,6 +1812,8 @@ function New-PortableRuntimeContext {
         LiteLLMHostAddress    = $LiteLLMHostAddress
         LiteLLMPort           = $LiteLLMPort
         LiteLLMMasterKey      = $LiteLLMMasterKey
+        LiteLLMAdminUser      = $LiteLLMAdminUser
+        LiteLLMAdminPassword  = $LiteLLMAdminPassword
         StoreModelInDb        = $StoreModelInDb
         DatabaseUrl           = $databaseUrl
         PrismaCliVersion      = $prismaCliVersion
@@ -1859,6 +1888,8 @@ function Set-PortableRuntimeEnvironment {
     $env:LITELLM_HOST = $Context.LiteLLMHostAddress
     $env:LITELLM_PORT = [string]$Context.LiteLLMPort
     $env:LITELLM_MASTER_KEY = $Context.LiteLLMMasterKey
+    $env:UI_USERNAME = $Context.LiteLLMAdminUser
+    $env:UI_PASSWORD = $Context.LiteLLMAdminPassword
     $env:LITELLM_DISABLE_NO_REDIS_WARNING = 'true'
 
     if ($Context.StoreModelInDb) {
@@ -2470,7 +2501,9 @@ param(
     [Parameter()] [string]$PostgresSuperUser = 'postgres',
     [Parameter()] [string]$LiteLLMHostAddress = '127.0.0.1',
     [Parameter()] [int]$LiteLLMPort = 4000,
-    [Parameter()] [string]$LiteLLMMasterKey = 'sk-1234',
+    [Parameter()] [string]$LiteLLMMasterKey = 'sk-12345',
+    [Parameter()] [string]$LiteLLMAdminUser = 'g4-admin',
+    [Parameter()] [string]$LiteLLMAdminPassword = 'sk-12345',
     [Parameter()] [bool]$StoreModelInDb = $true,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$LiteLLMArgument
@@ -2503,7 +2536,7 @@ $slug = Get-ActiveRuntimeSlug -Root $root
 $context = New-PortableRuntimeContext -Root $root -RuntimeSlug $slug `
     -PostgresHostAddress $PostgresHostAddress -PostgresPort $PostgresPort `
     -PostgresDatabase $PostgresDatabase -PostgresUser $PostgresUser -PostgresPassword $PostgresPassword -PostgresSuperUser $PostgresSuperUser `
-    -LiteLLMHostAddress $LiteLLMHostAddress -LiteLLMPort $LiteLLMPort -LiteLLMMasterKey $LiteLLMMasterKey `
+    -LiteLLMHostAddress $LiteLLMHostAddress -LiteLLMPort $LiteLLMPort -LiteLLMMasterKey $LiteLLMMasterKey -LiteLLMAdminUser $LiteLLMAdminUser -LiteLLMAdminPassword $LiteLLMAdminPassword `
     -StoreModelInDb $StoreModelInDb
 
 Set-PortableRuntimeEnvironment -Context $context
@@ -2531,7 +2564,9 @@ param(
     [Parameter()] [string]$PostgresSuperUser = 'postgres',
     [Parameter()] [string]$LiteLLMHostAddress = '127.0.0.1',
     [Parameter()] [int]$LiteLLMPort = 4000,
-    [Parameter()] [string]$LiteLLMMasterKey = 'sk-1234',
+    [Parameter()] [string]$LiteLLMMasterKey = 'sk-12345',
+    [Parameter()] [string]$LiteLLMAdminUser = 'g4-admin',
+    [Parameter()] [string]$LiteLLMAdminPassword = 'sk-12345',
     [Parameter()] [bool]$StoreModelInDb = $true
 )
 
@@ -2561,7 +2596,7 @@ $slug = Get-ActiveRuntimeSlug -Root $root -AllowMissing
 $context = New-PortableRuntimeContext -Root $root -RuntimeSlug $slug `
     -PostgresHostAddress $PostgresHostAddress -PostgresPort $PostgresPort `
     -PostgresDatabase $PostgresDatabase -PostgresUser $PostgresUser -PostgresPassword $PostgresPassword -PostgresSuperUser $PostgresSuperUser `
-    -LiteLLMHostAddress $LiteLLMHostAddress -LiteLLMPort $LiteLLMPort -LiteLLMMasterKey $LiteLLMMasterKey `
+    -LiteLLMHostAddress $LiteLLMHostAddress -LiteLLMPort $LiteLLMPort -LiteLLMMasterKey $LiteLLMMasterKey -LiteLLMAdminUser $LiteLLMAdminUser -LiteLLMAdminPassword $LiteLLMAdminPassword `
     -StoreModelInDb $StoreModelInDb
 
 Set-PortableRuntimeEnvironment -Context $context
