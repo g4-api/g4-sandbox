@@ -130,6 +130,11 @@
     LiteLLM database role password. Local-only development default; override for non-local use.
     URL-encoded into DATABASE_URL and SQL-escaped into the role creation script.
 
+.PARAMETER PostgresSuperUser
+    Superuser role used to initialize the PostgreSQL cluster and to create the LiteLLM role and
+    database. initdb always creates it (deterministic across machines) and psql uses it for role
+    and database creation. Default 'postgres'.
+
 .PARAMETER LiteLLMHostAddress
     Address the LiteLLM proxy binds to.
 
@@ -1734,9 +1739,6 @@ function New-PortableRuntimeContext {
         [string]$PostgresPassword,
 
         [Parameter(Mandatory = $true)]
-        [string]$PostgresSuperUser,
-
-        [Parameter(Mandatory = $true)]
         [string]$LiteLLMHostAddress,
 
         [Parameter(Mandatory = $true)]
@@ -1824,9 +1826,6 @@ function New-PortableRuntimeContext {
         PostgresDatabase      = $PostgresDatabase
         PostgresUser          = $PostgresUser
         PostgresPassword      = $PostgresPassword
-        PostgresSuperUser     = $PostgresSuperUser
-        CreateDatabaseSqlPath = Join-Path $binDirectory 'create-litellm-database.sql'
-        DatabaseSetupScriptPath = Join-Path $binDirectory 'setup-litellm-database.py'
         LiteLLMHostAddress    = $LiteLLMHostAddress
         LiteLLMPort           = $LiteLLMPort
         LiteLLMMasterKey      = $LiteLLMMasterKey
@@ -2390,104 +2389,6 @@ function Stop-PortablePostgres {
     return [pscustomobject]@{ Action = 'Stop'; PostgresStopped = $true }
 }
 
-function Test-LiteLLMDatabaseProvisioned {
-    [CmdletBinding()]
-    [OutputType([bool])]
-    param(
-        [Parameter(Mandatory = $true)]
-        [pscustomobject]$Context
-    )
-
-    $psqlExe = Join-Path $Context.PgBin 'psql'
-    if (-not (Test-Path -LiteralPath $psqlExe)) {
-        return $false
-    }
-
-    $userLiteral = $Context.PostgresUser.Replace("'", "''")
-    $databaseLiteral = $Context.PostgresDatabase.Replace("'", "''")
-    $expression = "SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '$userLiteral') AND EXISTS(SELECT 1 FROM pg_catalog.pg_database WHERE datname = '$databaseLiteral');"
-
-    try {
-        $result = & $psqlExe -h $Context.PostgresHostAddress -p ([string]$Context.PostgresPort) -U $Context.PostgresSuperUser -d 'postgres' -t -A -c $expression 2>&1
-    }
-    catch {
-        # A failed connection or a missing superuser role means "not provisioned". This predicate
-        # must never abort the caller's flow (deploy verify / start-time provisioning checks).
-        return $false
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        return $false
-    }
-
-    return (($result -join '').Trim() -eq 't')
-}
-
-function Ensure-LiteLLMDatabase {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [pscustomobject]$Context
-    )
-
-    # Idempotent database bootstrap for the Start path. A clean deploy never provisions the
-    # LiteLLM role/database/schema - the first Start does, and later Starts no-op here.
-    if (Test-LiteLLMDatabaseProvisioned -Context $Context) {
-        Write-Host '[OK] LiteLLM database is already provisioned.'
-        return
-    }
-
-    if (-not (Test-PostgresReady -Context $Context)) {
-        throw [System.InvalidOperationException]::new('PostgreSQL is not accepting connections; cannot provision the LiteLLM database.')
-    }
-
-    Write-Host '[DB] Provisioning LiteLLM role and database (first start from this sandbox)...'
-    $psqlExe = Join-Path $Context.PgBin 'psql'
-    Invoke-NativeCommand -FilePath $psqlExe -ArgumentList @(
-        '-h', $Context.PostgresHostAddress,
-        '-p', [string]$Context.PostgresPort,
-        '-U', $Context.PostgresSuperUser,
-        '-d', 'postgres',
-        '-v', 'ON_ERROR_STOP=1',
-        '-f', $Context.CreateDatabaseSqlPath
-    )
-
-    if (-not (Test-LiteLLMDatabaseProvisioned -Context $Context)) {
-        throw [System.InvalidOperationException]::new('The LiteLLM role/database were not created by the provisioning SQL.')
-    }
-
-    $pythonExe = Get-PortablePythonExe -Context $Context
-    $env:PORTABLE_PYTHON_EXE = $pythonExe
-
-    Write-Host '[DB] Creating/synchronizing LiteLLM schema and migration ledger...'
-    Invoke-NativeCommand -FilePath $pythonExe -ArgumentList @($Context.DatabaseSetupScriptPath)
-
-    # Stage: connect check as the LiteLLM role, mirroring deploy-side verification.
-    Invoke-NativeCommand -FilePath $psqlExe -ArgumentList @(
-        '-h', $Context.PostgresHostAddress,
-        '-p', [string]$Context.PostgresPort,
-        '-U', $Context.PostgresUser,
-        '-d', $Context.PostgresDatabase,
-        '-v', 'ON_ERROR_STOP=1',
-        '-c', 'SELECT 1 AS portable_db_ok;'
-    )
-
-    Write-Host '[OK] LiteLLM database provisioned.'
-
-    $markerPath = Join-Path $Context.Root 'state/deploy-complete.json'
-    if (Test-Path -LiteralPath $markerPath) {
-        try {
-            $marker = (Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json)
-            Add-Member -InputObject $marker -NotePropertyName 'databaseInitialized' -NotePropertyValue $true -Force
-            $json = $marker | ConvertTo-Json -Depth 6
-            [System.IO.File]::WriteAllText($markerPath, ($json -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
-        }
-        catch {
-            Write-Warning ('Could not update deploy complete marker: ' + $_.Exception.Message)
-        }
-    }
-}
-
 function Start-LiteLLMProxy {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -2526,8 +2427,6 @@ function Start-LiteLLMProxy {
         Start-PortablePostgres -Context $Context
     }
 
-    Ensure-LiteLLMDatabase -Context $Context
-
     $argumentList = @(
         $Context.LiteLLMBootstrapPath,
         '--config', $Context.ConfigPath,
@@ -2558,7 +2457,6 @@ param(
     [Parameter()] [string]$PostgresDatabase = 'litellm',
     [Parameter()] [string]$PostgresUser = 'litellm',
     [Parameter()] [string]$PostgresPassword = 'litellm-local',
-    [Parameter()] [string]$PostgresSuperUser = 'postgres',
     [Parameter()] [string]$LiteLLMHostAddress = '127.0.0.1',
     [Parameter()] [int]$LiteLLMPort = 4000,
     [Parameter()] [string]$LiteLLMMasterKey = 'sk-12345',
@@ -2594,7 +2492,7 @@ if (-not (Test-Path -LiteralPath $root)) {
 $slug = Get-ActiveRuntimeSlug -Root $root
 $context = New-PortableRuntimeContext -Root $root -RuntimeSlug $slug `
     -PostgresHostAddress $PostgresHostAddress -PostgresPort $PostgresPort `
-    -PostgresDatabase $PostgresDatabase -PostgresUser $PostgresUser -PostgresPassword $PostgresPassword -PostgresSuperUser $PostgresSuperUser `
+    -PostgresDatabase $PostgresDatabase -PostgresUser $PostgresUser -PostgresPassword $PostgresPassword `
     -LiteLLMHostAddress $LiteLLMHostAddress -LiteLLMPort $LiteLLMPort -LiteLLMMasterKey $LiteLLMMasterKey -LiteLLMAdminUser $LiteLLMAdminUser -LiteLLMAdminPassword $LiteLLMAdminPassword `
     -StoreModelInDb $StoreModelInDb
 
@@ -2620,7 +2518,6 @@ param(
     [Parameter()] [string]$PostgresDatabase = 'litellm',
     [Parameter()] [string]$PostgresUser = 'litellm',
     [Parameter()] [string]$PostgresPassword = 'litellm-local',
-    [Parameter()] [string]$PostgresSuperUser = 'postgres',
     [Parameter()] [string]$LiteLLMHostAddress = '127.0.0.1',
     [Parameter()] [int]$LiteLLMPort = 4000,
     [Parameter()] [string]$LiteLLMMasterKey = 'sk-12345',
@@ -2654,7 +2551,7 @@ if (-not (Test-Path -LiteralPath $root)) {
 $slug = Get-ActiveRuntimeSlug -Root $root -AllowMissing
 $context = New-PortableRuntimeContext -Root $root -RuntimeSlug $slug `
     -PostgresHostAddress $PostgresHostAddress -PostgresPort $PostgresPort `
-    -PostgresDatabase $PostgresDatabase -PostgresUser $PostgresUser -PostgresPassword $PostgresPassword -PostgresSuperUser $PostgresSuperUser `
+    -PostgresDatabase $PostgresDatabase -PostgresUser $PostgresUser -PostgresPassword $PostgresPassword `
     -LiteLLMHostAddress $LiteLLMHostAddress -LiteLLMPort $LiteLLMPort -LiteLLMMasterKey $LiteLLMMasterKey -LiteLLMAdminUser $LiteLLMAdminUser -LiteLLMAdminPassword $LiteLLMAdminPassword `
     -StoreModelInDb $StoreModelInDb
 
@@ -3657,39 +3554,6 @@ function Initialize-LiteLLMDatabase {
     Assert-PrismaClientUsable -Context $Context
 }
 
-function Test-LiteLLMDatabaseProvisioned {
-    [CmdletBinding()]
-    [OutputType([bool])]
-    param(
-        [Parameter(Mandatory = $true)]
-        [pscustomobject]$Context
-    )
-
-    $psqlExe = Join-Path $Context.PgBin 'psql'
-    if (-not (Test-Path -LiteralPath $psqlExe)) {
-        return $false
-    }
-
-    $userLiteral = $Context.PostgresUser.Replace("'", "''")
-    $databaseLiteral = $Context.PostgresDatabase.Replace("'", "''")
-    $expression = "SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '$userLiteral') AND EXISTS(SELECT 1 FROM pg_catalog.pg_database WHERE datname = '$databaseLiteral');"
-
-    try {
-        $result = & $psqlExe -h $Context.PostgresHostAddress -p ([string]$Context.PostgresPort) -U $Context.PostgresSuperUser -d 'postgres' -t -A -c $expression 2>&1
-    }
-    catch {
-        # A failed connection or a missing superuser role means "not provisioned". This predicate
-        # must never abort the caller's flow (deploy verify / start-time provisioning checks).
-        return $false
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        return $false
-    }
-
-    return (($result -join '').Trim() -eq 't')
-}
-
 function Assert-PrismaClientUsable {
     [CmdletBinding()]
     param(
@@ -3699,13 +3563,13 @@ function Assert-PrismaClientUsable {
 
     $pythonExe = Get-PortablePythonExe -Context $Context
 
-    if ((Test-PostgresReady -Context $Context) -and (Test-LiteLLMDatabaseProvisioned -Context $Context)) {
+    if (Test-PostgresReady -Context $Context) {
         $expression = $script:PrismaClientConnectExpression
         $checkName = 'connect'
     }
     else {
         $expression = $script:PrismaClientConstructExpression
-        $checkName = 'unavailable (PostgreSQL not running or LiteLLM database not provisioned; connect check deferred to first start)'
+        $checkName = 'construct (PostgreSQL not running; connect check skipped)'
     }
 
     $exitCode = Invoke-NativeCommand -FilePath $pythonExe -ArgumentList @('-c', $expression) -PassThruExitCode
@@ -3765,22 +3629,16 @@ function Test-PortableDeployment {
         Write-Warning 'MCP availability probe did not run (module path may have changed in this LiteLLM version).'
     }
 
-    # Stage: database connectivity as the LiteLLM role. A clean deploy ships without the LiteLLM
-    # database (created on the first start), so this connect check is skipped until then.
-    if (Test-LiteLLMDatabaseProvisioned -Context $Context) {
-        $psqlExe = Join-Path $Context.PgBin 'psql'
-        Invoke-NativeCommand -FilePath $psqlExe -ArgumentList @(
-            '-h', $Context.PostgresHostAddress,
-            '-p', [string]$Context.PostgresPort,
-            '-U', $Context.PostgresUser,
-            '-d', $Context.PostgresDatabase,
-            '-v', 'ON_ERROR_STOP=1',
-            '-c', 'SELECT 1 AS portable_db_ok;'
-        )
-    }
-    else {
-        Write-Host '[INFO] LiteLLM database not provisioned at deploy time (created on the first start from this sandbox).'
-    }
+    # Stage: database connectivity as the LiteLLM role.
+    $psqlExe = Join-Path $Context.PgBin 'psql'
+    Invoke-NativeCommand -FilePath $psqlExe -ArgumentList @(
+        '-h', $Context.PostgresHostAddress,
+        '-p', [string]$Context.PostgresPort,
+        '-U', $Context.PostgresUser,
+        '-d', $Context.PostgresDatabase,
+        '-v', 'ON_ERROR_STOP=1',
+        '-c', 'SELECT 1 AS portable_db_ok;'
+    )
 
     Write-Host "[OK] Runtime '$($Context.RuntimeSlug)' verified."
     return [pscustomobject]@{ Action = 'Verify'; Verified = $true; Root = $Context.Root; Runtime = $Context.RuntimeSlug }
@@ -3817,11 +3675,6 @@ function Get-PortableStatus {
 
     $proxyPortListening = Test-TcpEndpoint -TargetHost $Context.LiteLLMHostAddress -Port $Context.LiteLLMPort -TimeoutMilliseconds 800
 
-    $databaseInitialized = $false
-    if ($postgresInstalled -and $clusterInitialized -and $postgresResponding) {
-        $databaseInitialized = Test-LiteLLMDatabaseProvisioned -Context $Context
-    }
-
     $prismaCliDisplay = $(if ([string]::IsNullOrWhiteSpace($Context.PrismaCliVersion)) { '(client default)' } else { $Context.PrismaCliVersion })
 
     $status = [pscustomobject]@{
@@ -3837,7 +3690,6 @@ function Get-PortableStatus {
         PostgresInstalled  = $postgresInstalled
         ClusterInitialized = $clusterInitialized
         PostgresResponding = $postgresResponding
-        DatabaseInitialized = $databaseInitialized
         ProxyPortListening = $proxyPortListening
         LiteLLMUrl         = "http://$($Context.LiteLLMHostAddress):$($Context.LiteLLMPort)"
     }
@@ -3851,7 +3703,6 @@ function Get-PortableStatus {
     Write-Host ("  PostgreSQL present : " + $status.PostgresInstalled)
     Write-Host ("  Cluster initialized: " + $status.ClusterInitialized)
     Write-Host ("  PostgreSQL ready   : " + $status.PostgresResponding)
-    Write-Host ("  LiteLLM DB ready   : " + $status.DatabaseInitialized)
     Write-Host ("  Proxy port open    : " + $status.ProxyPortListening)
 
     return $status
@@ -3893,10 +3744,6 @@ function Start-LiteLLMProxy {
 
     if (-not (Test-PostgresReady -Context $Context)) {
         Start-PortablePostgres -Context $Context
-    }
-
-    if (-not (Test-LiteLLMDatabaseProvisioned -Context $Context)) {
-        Initialize-LiteLLMDatabase -Context $Context
     }
 
     $argumentList = @(
@@ -4033,7 +3880,6 @@ function Write-DeployCompleteMarker {
     $markerContent = [pscustomobject]@{
         completedUtc    = (Get-Date).ToUniversalTime().ToString('o')
         activeRuntime   = $Context.RuntimeSlug
-        databaseInitialized = $false
         litellm         = $Context.LiteLLMVersion
         python          = $Context.PythonVersion
         postgresVersion = $Context.PostgresVersion
@@ -4125,14 +3971,11 @@ function Invoke-PortableDeployment {
     Write-StageBanner -Name 'Start PostgreSQL'
     Start-PortablePostgres -Context $Context
 
+    Write-StageBanner -Name 'Initialize LiteLLM database'
+    Initialize-LiteLLMDatabase -Context $Context
+
     Write-StageBanner -Name 'Verify deployment'
     Test-PortableDeployment -Context $Context | Out-Null
-
-    # Clean artifact: stop PostgreSQL before the box ships. The LiteLLM role, database, and
-    # Prisma schema are created idempotently on the first Start from the sandbox.
-    Write-StageBanner -Name 'Stop PostgreSQL'
-    Stop-PortablePostgres -Context $Context | Out-Null
-    Write-Host '[OK] PostgreSQL stopped - the LiteLLM role, database, and schema are created on the first start from the sandbox.'
 
     $previousRuntime = Set-ActiveRuntime -Root $Context.Root -Slug $Context.RuntimeSlug
     Write-DeployCompleteMarker -Context $Context
@@ -4146,14 +3989,14 @@ function Invoke-PortableDeployment {
         Write-Host ("  Rollback to: " + $previousRuntime + "   (-Action Rollback)")
     }
     Write-Host ''
-    Write-Host 'PostgreSQL is stopped. Start the proxy later with -Action Start (this provisions the LiteLLM database on the first start).'
+    Write-Host 'PostgreSQL is running. Use -Action Start to launch the proxy later.'
 
     $summary = [pscustomobject]@{
         Action          = 'Deploy'
         Root            = $Context.Root
         Runtime         = $Context.RuntimeSlug
         LiteLLMUrl      = "http://$($Context.LiteLLMHostAddress):$($Context.LiteLLMPort)"
-        PostgresRunning = [bool]$StartProxyAfterDeploy
+        PostgresRunning = $true
         Verified        = $true
         ProxyStarted    = [bool]$StartProxyAfterDeploy
     }
