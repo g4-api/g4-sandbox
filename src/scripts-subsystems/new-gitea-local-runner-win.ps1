@@ -22,7 +22,7 @@ try {
         '--instance'
         'http://localhost:3000/'
         '--name'
-        "$env:COMPUTERNAME-windows"
+        'g4-windows'
         '--labels'
         'windows:host'
     )

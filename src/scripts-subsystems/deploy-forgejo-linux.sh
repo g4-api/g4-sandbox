@@ -613,7 +613,7 @@ EOF
     # identity file are deprecated and no longer feed the daemon. Prepare that
     # config so the daemon starts with a usable connection.
 
-    RUNNER_NAME="$(hostname -s)-linux"
+    RUNNER_NAME="g4-linux"
     RUNNER_SECRET=""
 
     # Reuse a previously issued runner secret so reruns keep the same identity:
@@ -980,7 +980,7 @@ EOF_STOP_LAUNCHER
     echo "Server log: $SERVER_LOG_FILE"
     echo "Stop: $FORGEJO_ROOT/stop-forgejo.sh"
     echo "Start (also after reboot): $FORGEJO_ROOT/start-forgejo.sh"
-    echo "Runner: $(hostname -s)-linux ($RUNNER_LABELS, runs as $FORGEJO_USER)"
+    echo "Runner: g4-linux ($RUNNER_LABELS, runs as $FORGEJO_USER)"
     echo "Runner version: $RUNNER_VERSION"
     echo "Launchers: $FORGEJO_ROOT/start-forgejo.sh and $FORGEJO_ROOT/stop-forgejo.sh"
 

@@ -556,7 +556,7 @@ try {
                 'register',
                 '--no-interactive',
                 '--instance', "http://127.0.0.1:$HttpPort/",
-                '--name', "$env:COMPUTERNAME-windows",
+                '--name', 'g4-windows',
                 '--labels', 'windows:host'
             ) `
             -WorkingDirectory $runnerRoot `
@@ -717,7 +717,7 @@ Write-Host "Location:       $resolvedRoot"
 Write-Host "URL:            http://localhost:$HttpPort/"
 Write-Host "Username:       $AdminUser"
 Write-Host 'Password:       configured as requested'
-Write-Host "Runner:         $env:COMPUTERNAME-windows (windows:host)"
+Write-Host "Runner:         g4-windows (windows:host)"
 Write-Host
 Write-Host 'Use start-gitea.cmd and stop-gitea.cmd for normal operation.'
 Write-Host 'No firewall rule was created. LAN access may require a Private-network inbound rule.'
