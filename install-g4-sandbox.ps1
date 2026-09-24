@@ -1,8 +1,18 @@
 $ErrorActionPreference = 'SilentlyContinue'
 
-$repoUrl     = 'https://github.com/g4-api/g4-sandbox.git'
-$rootWorkDir = Join-Path $env:TEMP 'g4-sandbox-bootstrap'
-$repoDir     = Join-Path $rootWorkDir 'repo'
+$repoUrl = 'https://github.com/g4-api/g4-sandbox.git'
+$rootWorkBase = [System.IO.DriveInfo]::GetDrives() |
+    Where-Object { $_.IsReady -and $_.DriveType -eq [System.IO.DriveType]::Fixed } |
+    Sort-Object AvailableFreeSpace -Descending |
+    Select-Object -First 1
+$rootWorkRoot = if ($rootWorkBase) {
+    $rootWorkBase.RootDirectory.FullName
+}
+else {
+    [System.IO.Path]::GetPathRoot($env:TEMP)
+}
+$rootWorkDir = Join-Path $rootWorkRoot 'g4-sandbox-bootstrap'
+$repoDir = Join-Path $rootWorkDir 'repo'
 $srcDir      = Join-Path $repoDir 'src'
 $toolsDir    = Join-Path $rootWorkDir 'tools'
 $psDir       = Join-Path $toolsDir 'powershell'

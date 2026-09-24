@@ -2,13 +2,32 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/g4-api/g4-sandbox.git"
-ROOT_WORK_DIR="/tmp/g4-sandbox-bootstrap"
+OUTPUT_DIR="/opt/g4-sandbox"
+
+# The build work dir is wired into the script (never user-controlled): it is
+# placed on whichever of /var/cache, the invoking user's cache, or /tmp is the
+# roomiest so the litellm/forgejo staging cannot exhaust a small tmpfs /tmp.
+resolve_work_dir() {
+  local best="" best_kb=0 parent free_kb
+  for parent in "/var/cache" "$HOME/.cache" "/tmp"; do
+    free_kb=$(df -Pk "$parent" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "$free_kb" ] && [ "$free_kb" -gt "$best_kb" ]; then
+      best_kb="$free_kb"
+      best="$parent"
+    fi
+  done
+  if [ -z "$best" ]; then
+    best="/tmp"
+  fi
+  ROOT_WORK_DIR="$best/g4-sandbox-bootstrap"
+}
+
+resolve_work_dir
 REPO_DIR="$ROOT_WORK_DIR/repo"
 SRC_DIR="$REPO_DIR/src"
 TOOLS_DIR="$ROOT_WORK_DIR/tools"
 PS_DIR="$TOOLS_DIR/powershell"
 PS_ARCHIVE="$TOOLS_DIR/powershell.tar.gz"
-OUTPUT_DIR="/opt/g4-sandbox"
 
 SUDO=""
 
@@ -23,6 +42,22 @@ cleanup() {
 require_sudo() {
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     SUDO="sudo"
+  fi
+}
+
+elevate_if_root_required() {
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    SUDO_ENV_ARGS=()
+    for VAR_NAME in GITHUB_TOKEN GH_TOKEN; do
+      if [ -n "${!VAR_NAME:-}" ]; then
+        SUDO_ENV_ARGS+=("$VAR_NAME=${!VAR_NAME}")
+      fi
+    done
+    SCRIPT_PATH="${BASH_SOURCE[0]}"
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+      SCRIPT_PATH="$(pwd)/$SCRIPT_PATH"
+    fi
+    exec sudo env "${SUDO_ENV_ARGS[@]}" bash "$SCRIPT_PATH" "$@"
   fi
 }
 
@@ -149,6 +184,7 @@ publish_sandbox() {
 main() {
   trap cleanup EXIT
 
+  elevate_if_root_required
   require_sudo
   install_base_tools
   install_icu
