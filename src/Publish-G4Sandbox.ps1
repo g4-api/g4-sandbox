@@ -818,10 +818,10 @@ else {
                 #     via the generated stop launcher below instead).
                 #   - File checks below remain valid on both platforms.
                 $expectedBoxFiles = if ($scmBoxName -eq 'gitea') {
-                    @('gitea.exe', 'data\gitea.db', 'start-gitea.cmd', 'stop-gitea.cmd')
+                    @('gitea.exe', 'data/gitea.db', 'start-gitea.cmd', 'stop-gitea.cmd')
                 }
                 else {
-                    @('bin\forgejo', 'data\forgejo.db', 'start-forgejo.sh', 'stop-forgejo.sh')
+                    @('bin/forgejo', 'data/forgejo.db', 'start-forgejo.sh', 'stop-forgejo.sh')
                 }
 
                 $missingBoxFile = $expectedBoxFiles |
@@ -879,6 +879,19 @@ if ($Clean) {
 
 # Ensure the sandbox root directory exists.
 New-Item -ItemType Directory -Path $sandboxDirectory -Force | Out-Null
+
+# Preflight: confirm the output volume can hold the staged sandbox so low-disk
+# conditions fail with a clear message instead of a mid-copy "No space left on
+# device" or a mis-staged box.
+$stageSize = (Get-ChildItem -LiteralPath $stageDirectory -Recurse -Force -File |
+    Measure-Object -Property Length -Sum).Sum
+if ($null -eq $stageSize) { $stageSize = 0 }
+$outputDrive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($sandboxDirectory))
+$stageSizeText = '{0:N1} GiB' -f ($stageSize / 1GB)
+$freeSpaceText = '{0:N1} GiB' -f ($outputDrive.AvailableFreeSpace / 1GB)
+if ($outputDrive.AvailableFreeSpace -lt $stageSize) {
+    throw "Not enough free space on '$($outputDrive.Name)': the staged sandbox is $stageSizeText but the output volume only has $freeSpaceText."
+}
 
 # Resolve and normalize the stage root ONCE (important for performance).
 #

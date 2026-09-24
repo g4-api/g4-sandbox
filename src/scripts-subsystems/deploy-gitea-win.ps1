@@ -665,7 +665,12 @@ $GiteaProcesses = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePa
 if ($GiteaProcesses) {
     $env:GITEA_WORK_DIR = $Root
     $env:GITEA_CUSTOM = Join-Path $Root 'custom'
-    & $GiteaExe manager shutdown --config $ConfigPath 2>$null
+    try {
+        & $GiteaExe manager shutdown --config $ConfigPath 2>$null
+    }
+    catch {
+        $null = $_
+    }
     Start-Sleep -Seconds 2
 }
 
