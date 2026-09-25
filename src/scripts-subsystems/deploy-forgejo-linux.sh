@@ -275,20 +275,21 @@ main() {
     # published sandbox works unchanged on any host; override for LAN visibility.
     LAN_IP="${FORGEJO_IP:-127.0.0.1}"
 
-    # The boxed model: no systemd unit and no service account. A running server or
-    # runner is detected directly and must be stopped before installing.
+    # The boxed model: no systemd unit and no service account. A server or
+    # runner left over from a previous attempt is stopped before installing, so
+    # re-runs over a stale partial stage do not abort.
 
     if pgrep -f "$BIN_PATH.*web" >/dev/null 2>&1; then
-        echo "A Forgejo server process is already running." >&2
-        echo "Stop it first: $FORGEJO_ROOT/stop-forgejo.sh" >&2
-        exit 1
+        echo "Stopping leftover Forgejo server under $FORGEJO_ROOT."
+        pkill -f "$BIN_PATH.*web" >/dev/null 2>&1 || true
     fi
 
     if pgrep -f "$RUNNER_BIN.*daemon" >/dev/null 2>&1; then
-        echo "A Forgejo runner daemon is already running." >&2
-        echo "Stop it first: $FORGEJO_ROOT/stop-forgejo.sh" >&2
-        exit 1
+        echo "Stopping leftover Forgejo runner under $FORGEJO_ROOT."
+        pkill -f "$RUNNER_BIN.*daemon" >/dev/null 2>&1 || true
     fi
+
+    sleep 1
 
     install -d -o "$FORGEJO_USER" -g "$FORGEJO_USER" -m 0755 \
         "$FORGEJO_ROOT" \

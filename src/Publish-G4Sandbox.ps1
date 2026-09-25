@@ -155,6 +155,36 @@ if (-not [string]::IsNullOrWhiteSpace($githubToken)) {
     $tokenParameters['Token'] = $githubToken
 }
 
+# Resolve the user to run Linux subsystem deploys as. Under "curl | sudo bash"
+# the whole publish runs as root, but PostgreSQL's initdb and server refuse to
+# run as root, so those builds are delegated to the invoking (non-root) user.
+function Get-LinuxSubsystemRunAsUser {
+    [CmdletBinding()]
+    param()
+
+    $candidate = $null
+
+    $sudoUser = [string]$env:SUDO_USER
+    if (-not [string]::IsNullOrWhiteSpace($sudoUser)) {
+        $candidate = $sudoUser.Trim()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $idOutput = (& id -un 2>$null)
+        if ($null -ne $idOutput -and -not [string]::IsNullOrWhiteSpace([string]$idOutput)) {
+            $candidate = [string]$idOutput.Trim()
+        }
+    }
+
+    # 'sudo bash' sets SUDO_USER; a genuine root/console login has none, and
+    # there is no non-root user to delegate to.
+    if ([string]::IsNullOrWhiteSpace($candidate) -or "$candidate".Trim() -eq 'root') {
+        return $null
+    }
+
+    return [string]$candidate
+}
+
 # Staging root: kept on the same volume as the final output so the build cannot
 # exhaust a small /tmp or %TEMP% (the classic "No space left on device" failure).
 # It is derived from the output directory, not from the repo checkout location,
@@ -723,7 +753,53 @@ else {
 
                 # Build the box (downloads uv, CPython, LiteLLM, Prisma and
                 # PostgreSQL, initializes the database and verifies the runtime).
-                & $deployScriptPath -Action Deploy -ContainerRoot $containerRoot
+                #
+                # Linux: PostgreSQL's initdb and the server refuse to run as
+                # root, so when the publish runs as root (for example via
+                # "sudo bash install-g4-sandbox.sh") the deploy is delegated to
+                # the invoking non-root user. Windows deploys in-process.
+                $isLinuxVariable = Get-Variable -Name IsLinux -ErrorAction SilentlyContinue
+                $isLinuxHost = ($null -ne $isLinuxVariable -and [bool]$isLinuxVariable.Value)
+                $currentUid = (& id -u 2>$null)
+                $isRoot = ($isLinuxHost -and $null -ne $currentUid -and "$currentUid".Trim() -eq '0')
+
+                if (-not $isRoot) {
+                    & $deployScriptPath -Action Deploy -ContainerRoot $containerRoot
+                }
+                else {
+                    $deployUser = Get-LinuxSubsystemRunAsUser
+                    if ([string]::IsNullOrWhiteSpace($deployUser)) {
+                        throw [System.InvalidOperationException]::new(
+                            'A non-root user is required to build the Linux LiteLLM box (PostgreSQL refuses to run as root), but none could be determined.')
+                    }
+
+                    $pwshPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+                    if ([string]::IsNullOrWhiteSpace($pwshPath)) {
+                        $pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+                    }
+                    if ([string]::IsNullOrWhiteSpace($pwshPath)) {
+                        throw [System.InvalidOperationException]::new(
+                            'Could not resolve the PowerShell executable needed to run the LiteLLM deploy as a non-root user.')
+                    }
+
+                    $tokenForwarding = @()
+                    foreach ($tokenVar in @('GITHUB_TOKEN', 'GH_TOKEN')) {
+                        $tokenValue = [System.Environment]::GetEnvironmentVariable($tokenVar, 'Process')
+                        if (-not [string]::IsNullOrWhiteSpace($tokenValue)) {
+                            $tokenForwarding += "$tokenVar=$tokenValue"
+                        }
+                    }
+
+                    # The box directory is created by root above; hand it to the
+                    # deploy user so downloads and the PostgreSQL cluster can be
+                    # written there.
+                    & chown -R "${deployUser}:${deployUser}" $containerRoot
+
+                    $deployInvocation = @('sudo', '-u', $deployUser, 'env') + $tokenForwarding +
+                        @($pwshPath, '-NoLogo', '-NoProfile', '-File', $deployScriptPath,
+                          '-Action', 'Deploy', '-ContainerRoot', $containerRoot)
+                    & $deployInvocation
+                }
 
                 if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
                     throw [System.InvalidOperationException]::new(
@@ -732,7 +808,12 @@ else {
 
                 # Stop the detached PostgreSQL server so the staged box can be
                 # safely copied to the final sandbox location.
-                & $deployScriptPath -Action Stop -ContainerRoot $containerRoot
+                if (-not $isRoot) {
+                    & $deployScriptPath -Action Stop -ContainerRoot $containerRoot
+                }
+                else {
+                    & sudo -u $deployUser $pwshPath -NoLogo -NoProfile -File $deployScriptPath -Action Stop -ContainerRoot $containerRoot
+                }
 
                 Write-Host "LiteLLM subsystem deployed successfully." -ForegroundColor Green
             }
@@ -814,7 +895,16 @@ else {
                     # it into the stage; FORGEJO_IP is fixed to the loopback so
                     # the relocated sandbox works unchanged on any host.
                     $isRoot = ((& id -u 2>$null) -eq 0)
-                    $deployArgs = @('env', "FORGEJO_ROOT=$boxRoot", 'FORGEJO_IP=127.0.0.1', 'bash', $deployScriptPath)
+                    $deployArgs = @('env')
+
+                    # Pin the runtime user explicitly so a root (sudo) publish
+                    # does not depend on SUDO_USER reaching the installer env.
+                    $forgejoRunAsUser = Get-LinuxSubsystemRunAsUser
+                    if (-not [string]::IsNullOrWhiteSpace($forgejoRunAsUser)) {
+                        $deployArgs += "FORGEJO_USER=$forgejoRunAsUser"
+                    }
+
+                    $deployArgs += @("FORGEJO_ROOT=$boxRoot", 'FORGEJO_IP=127.0.0.1', 'bash', $deployScriptPath)
                     if ($isRoot) {
                         & $deployArgs
                     }
@@ -1012,6 +1102,19 @@ if (Test-Path -LiteralPath (Join-Path $stagedPostgresData "PG_VERSION")) {
     if ($missingPostgresDirectories.Count -gt 0) {
         throw "Published PostgreSQL cluster is incomplete. Missing directories: $($missingPostgresDirectories -join ', ')."
     }
+}
+
+# A staged LiteLLM box is published only if its generated launcher reached the
+# sandbox; a root-declined or otherwise failed build would otherwise ship an
+# empty box that the root launcher cannot start.
+$litellmLauncherName = if ($OperatingSystem -eq 'Windows') { 'start-litellm.cmd' } else { 'start-litellm.sh' }
+$missingLiteLLMBoxFile = if (Test-Path -LiteralPath (Join-Path $sandboxDirectory 'litellm') -PathType Container) {
+    @($litellmLauncherName) |
+        Where-Object { -not (Test-Path -LiteralPath (Join-Path (Join-Path $sandboxDirectory 'litellm') $_) -PathType Leaf) } |
+        Select-Object -First 1
+}
+if ($missingLiteLLMBoxFile) {
+    throw "Published LiteLLM box is incomplete: 'litellm/$missingLiteLLMBoxFile' was not created. The box build likely failed."
 }
 
 $publishedRuntimeStatePath = [System.IO.Path]::Combine(
