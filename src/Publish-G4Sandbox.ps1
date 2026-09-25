@@ -74,7 +74,16 @@ param(
     # Notes:
     #   - Relative paths are resolved from the current working directory
     #   - Will typically contain the final staged G4 bundle
-    [string]$OutputDirectory = "/tmp/g4-sandbox",
+    #
+    # The build staging root is derived from this directory (see below), so a
+    # platform-appropriate default avoids placing the multi-gigabyte stage on a
+    # small /tmp or drive root when no explicit output directory is supplied.
+    [string]$OutputDirectory = $(if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+        'C:\g4-sandbox'
+    }
+    else {
+        '/opt/g4-sandbox'
+    }),
     
     # When specified, performs a clean rebuild.
     #
@@ -146,7 +155,11 @@ if (-not [string]::IsNullOrWhiteSpace($githubToken)) {
     $tokenParameters['Token'] = $githubToken
 }
 
-$baseDirecotry = [System.IO.Path]::Combine($PSScriptRoot, "..", "..", "_g4")
+# Staging root: kept on the same volume as the final output so the build cannot
+# exhaust a small /tmp or %TEMP% (the classic "No space left on device" failure).
+# It is derived from the output directory, not from the repo checkout location,
+# and is removed again when publish finishes.
+$baseDirectory = [System.IO.Path]::GetFullPath(($OutputDirectory.TrimEnd('\', '/')) + '-bootstrap')
 
 # Base GitHub API URL for all g4-api repositories.
 #
@@ -185,8 +198,8 @@ $sourceDirectory = [System.IO.Path]::Combine($PSScriptRoot)
 # Notes:
 #   - "a" acts as the final assembled stage
 #   - "_work" stores temporary archives during download/extraction
-$stageDirectory = Join-Path $baseDirecotry "a"
-$workDirectory  = Join-Path $baseDirecotry "_work"
+$stageDirectory = Join-Path $baseDirectory "a"
+$workDirectory  = Join-Path $baseDirectory "_work"
 
 # Structured stage subdirectories.
 #
@@ -1064,10 +1077,10 @@ $ProgressPreference = 'SilentlyContinue'
 
 try {
     Write-Host "Removing sandbox directory..." -ForegroundColor DarkGray
-    Write-Host "Target: $baseDirecotry" -ForegroundColor DarkGray
+    Write-Host "Target: $baseDirectory" -ForegroundColor DarkGray
 
     Remove-Item `
-        -LiteralPath $baseDirecotry `
+        -LiteralPath $baseDirectory `
         -Recurse `
         -Force `
         -ErrorAction Stop
@@ -1077,7 +1090,7 @@ try {
 }
 catch {
     # Provide meaningful warning with context.
-    Write-Warning "Failed to remove directory: $($baseDirecotry)"
+    Write-Warning "Failed to remove directory: $($baseDirectory)"
     Write-Warning "Reason: $($_.Exception.Message)"
 }
 finally {
