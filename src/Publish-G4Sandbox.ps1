@@ -798,7 +798,10 @@ else {
                     $deployInvocation = @('sudo', '-u', $deployUser, 'env') + $tokenForwarding +
                         @($pwshPath, '-NoLogo', '-NoProfile', '-File', $deployScriptPath,
                           '-Action', 'Deploy', '-ContainerRoot', $containerRoot)
-                    & $deployInvocation
+
+                    # The call operator does not splat arrays, so the command is
+                    # taken from element [0] and the rest is splatted explicitly.
+                    & $deployInvocation[0] @($deployInvocation[1..($deployInvocation.Length - 1)])
                 }
 
                 if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
@@ -905,12 +908,11 @@ else {
                     }
 
                     $deployArgs += @("FORGEJO_ROOT=$boxRoot", 'FORGEJO_IP=127.0.0.1', 'bash', $deployScriptPath)
-                    if ($isRoot) {
-                        & $deployArgs
-                    }
-                    else {
-                        & sudo @deployArgs
-                    }
+
+                    # The call operator does not splat arrays; the proven working
+                    # form is a literal command plus an explicit '@' splat. Root's
+                    # sudo requires no password, so one path covers both.
+                    & 'sudo' @$deployArgs
                 }
 
                 # Validate the deployed box before trusting the stage copy.
