@@ -329,12 +329,22 @@ main() {
     cd "$DOWNLOAD_DIR"
     BASE_URL="https://codeberg.org/forgejo/forgejo/releases/download/v${FORGEJO_VERSION}"
 
+    echo "Downloading Forgejo binary: $(basename "$BIN_PATH")"
     curl --fail --location --progress-bar --show-error --remote-name \
-        "$BASE_URL/forgejo-${FORGEJO_VERSION}-linux-amd64"
+        "$BASE_URL/forgejo-${FORGEJO_VERSION}-linux-amd64" || {
+        echo "ERROR: Failed to download the Forgejo binary from $BASE_URL/forgejo-${FORGEJO_VERSION}-linux-amd64" >&2
+        exit 1
+    }
     curl --fail --location --progress-bar --show-error --remote-name \
-        "$BASE_URL/forgejo-${FORGEJO_VERSION}-linux-amd64.sha256"
+        "$BASE_URL/forgejo-${FORGEJO_VERSION}-linux-amd64.sha256" || {
+        echo "ERROR: Failed to download the checksum file from $BASE_URL/forgejo-${FORGEJO_VERSION}-linux-amd64.sha256" >&2
+        exit 1
+    }
 
-    sha256sum --check "forgejo-${FORGEJO_VERSION}-linux-amd64.sha256"
+    sha256sum --check "forgejo-${FORGEJO_VERSION}-linux-amd64.sha256" || {
+        echo "ERROR: Checksum verification failed for the downloaded Forgejo binary." >&2
+        exit 1
+    }
 
     install -o "$FORGEJO_USER" -g "$FORGEJO_USER" -m 0755 \
         "forgejo-${FORGEJO_VERSION}-linux-amd64" "$BIN_PATH"
