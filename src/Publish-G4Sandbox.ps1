@@ -1129,7 +1129,7 @@ if ($OperatingSystem -ne 'Windows') {
 # (0755), and the ownership pass does not touch modes - so restore them. Files
 # become 0600, directories 0700.
 if ($OperatingSystem -ne 'Windows') {
-    $chmodCommand = Get-Command chmod -CommandType Application -ErrorAction SilentlyContinue
+    $chmodCommand = Get-Command chmod -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     $publishedPostgresDataRoot = [System.IO.Path]::Combine(
         $sandboxDirectory,
         "litellm",
