@@ -1124,6 +1124,27 @@ if ($OperatingSystem -ne 'Windows') {
     }
 }
 
+# PostgreSQL requires its data directory to be 0700 (or 0750). initdb creates
+# it 0700, but the copy above synthesizes directories with umask-derived modes
+# (0755), and the ownership pass does not touch modes - so restore them. Files
+# become 0600, directories 0700.
+if ($OperatingSystem -ne 'Windows') {
+    $chmodCommand = Get-Command chmod -CommandType Application -ErrorAction SilentlyContinue
+    $publishedPostgresDataRoot = [System.IO.Path]::Combine(
+        $sandboxDirectory,
+        "litellm",
+        "data",
+        "postgresql"
+    )
+    if (
+        $null -ne $chmodCommand -and
+        (Test-Path -LiteralPath $publishedPostgresDataRoot -PathType Container)
+    ) {
+        Write-Host "Restoring PostgreSQL data directory permissions..." -ForegroundColor DarkGray
+        & $chmodCommand -R 'u=rwX,go=' $publishedPostgresDataRoot
+    }
+}
+
 # A staged PostgreSQL cluster is valid only if its required empty directories
 # also reached the published sandbox.
 $stagedPostgresData = [System.IO.Path]::Combine($stageDirectory, "litellm", "data", "postgresql")
