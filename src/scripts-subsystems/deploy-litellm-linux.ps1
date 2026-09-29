@@ -1617,6 +1617,36 @@ if __name__ == "__main__":
     $databaseLiteral = $Context.PostgresDatabase.Replace("'", "''")
     $passwordLiteral = $Context.PostgresPassword.Replace("'", "''")
 
+    # The cluster is initialized with --auth=trust and its superuser named
+    # 'postgres'. Local connections that omit the username default to the OS
+    # user running the box, which is never a role unless we create one - without
+    # it those implicit connections die with 'role "..." does not exist'. Give
+    # the invoking OS user a LOGIN role when they are not already covered.
+    $osUserIdentifier = ''
+    $osIdOutput = (& id -un 2>$null)
+    if ($null -ne $osIdOutput) {
+        $osUserIdentifier = [string]$osIdOutput.Trim().Replace('"', '""')
+    }
+    $osUserSqlBlock = ''
+    if (
+        -not [string]::IsNullOrWhiteSpace($osUserIdentifier) -and
+        $osUserIdentifier -ne $Context.PostgresUser -and
+        $osUserIdentifier -ne $Context.PostgresSuperUser
+    ) {
+        $osUserLiteral = $osUserIdentifier.Replace("'", "''")
+        $osUserSqlBlock = @"
+
+DO
+`$do`$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$osUserLiteral') THEN
+        CREATE ROLE "$osUserIdentifier" WITH LOGIN;
+    END IF;
+END
+`$do`$;
+"@
+    }
+
     $createDatabaseSql = @"
 DO
 `$do`$
@@ -1626,7 +1656,7 @@ BEGIN
     END IF;
 END
 `$do`$;
-
+$osUserSqlBlock
 SELECT 'CREATE DATABASE "$databaseIdentifier" OWNER "$userIdentifier"'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$databaseLiteral')
 \gexec
