@@ -299,7 +299,7 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$LiteLLMHostAddress = '127.0.0.1',
+    [string]$LiteLLMHostAddress = '0.0.0.0',
 
     [Parameter()]
     [ValidateRange(1, 65535)]
@@ -2392,7 +2392,7 @@ param(
     [Parameter()] [string]$PostgresDatabase = 'litellm',
     [Parameter()] [string]$PostgresUser = 'litellm',
     [Parameter()] [string]$PostgresPassword = 'litellm-local',
-    [Parameter()] [string]$LiteLLMHostAddress = '127.0.0.1',
+    [Parameter()] [string]$LiteLLMHostAddress = '0.0.0.0',
     [Parameter()] [int]$LiteLLMPort = 4000,
     [Parameter()] [string]$LiteLLMMasterKey = 'sk-12345',
     [Parameter()] [string]$LiteLLMAdminUser = 'g4-admin',
@@ -2454,7 +2454,7 @@ param(
     [Parameter()] [string]$PostgresDatabase = 'litellm',
     [Parameter()] [string]$PostgresUser = 'litellm',
     [Parameter()] [string]$PostgresPassword = 'litellm-local',
-    [Parameter()] [string]$LiteLLMHostAddress = '127.0.0.1',
+    [Parameter()] [string]$LiteLLMHostAddress = '0.0.0.0',
     [Parameter()] [int]$LiteLLMPort = 4000,
     [Parameter()] [string]$LiteLLMMasterKey = 'sk-12345',
     [Parameter()] [string]$LiteLLMAdminUser = 'g4-admin',
