@@ -747,6 +747,7 @@ else {
             # settings for the duration of the call, then restore them so the
             # remainder of this script keeps its strict behavior.
             $previousErrorActionPreference = $ErrorActionPreference
+            $litellmLogPath = $null
             try {
                 Set-StrictMode -Off
                 $ErrorActionPreference = 'Continue'
@@ -801,7 +802,15 @@ else {
 
                     # The call operator does not splat arrays, so the command is
                     # taken from element [0] and the rest is splatted explicitly.
-                    & $deployInvocation[0] @($deployInvocation[1..($deployInvocation.Length - 1)])
+                    #
+                    # Capture the deploy output so a later failure can point at
+                    # the exact failing step instead of only the box validation.
+                    $litellmDeployOutput = & $deployInvocation[0] @($deployInvocation[1..($deployInvocation.Length - 1)]) 2>&1
+                    if ($null -ne $litellmDeployOutput) {
+                        $litellmLogPath = Join-Path $workDirectory 'litellm-deploy.log'
+                        New-Item -ItemType Directory -Path $workDirectory -Force | Out-Null
+                        $litellmDeployOutput | Out-File -LiteralPath $litellmLogPath -Encoding utf8
+                    }
                 }
 
                 if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
@@ -821,7 +830,11 @@ else {
                 Write-Host "LiteLLM subsystem deployed successfully." -ForegroundColor Green
             }
             catch {
-                Write-Warning "LiteLLM subsystem deployment failed: $($_.Exception.Message). Continuing without LiteLLM."
+                $litellmLogHint = ''
+                if ($null -ne $litellmLogPath -and (Test-Path -LiteralPath $litellmLogPath)) {
+                    $litellmLogHint = " Deploy log: $litellmLogPath"
+                }
+                Write-Warning "LiteLLM subsystem deployment failed: $($_.Exception.Message). Continuing without LiteLLM.$litellmLogHint"
             }
             finally {
                 Set-StrictMode -Version Latest
@@ -912,7 +925,15 @@ else {
                     # The call operator does not splat arrays; the proven working
                     # form is a literal command plus an explicit '@' splat. Root's
                     # sudo requires no password, so one path covers both.
-                    & 'sudo' @$deployArgs
+                    #
+                    # Capture the deploy output so a later failure can point at
+                    # the exact failing step instead of only the box validation.
+                    $forgejoDeployOutput = & 'sudo' @$deployArgs 2>&1
+                    if ($null -ne $forgejoDeployOutput) {
+                        $forgejoLogPath = Join-Path $workDirectory 'forgejo-deploy.log'
+                        New-Item -ItemType Directory -Path $workDirectory -Force | Out-Null
+                        $forgejoDeployOutput | Out-File -LiteralPath $forgejoLogPath -Encoding utf8
+                    }
                 }
 
                 # Validate the deployed box before trusting the stage copy.
@@ -957,7 +978,11 @@ else {
                 Write-Host "Source-control box '$scmBoxName' deployed successfully." -ForegroundColor Green
             }
             catch {
-                Write-Warning "Source-control subsystem deployment failed: $($_.Exception.Message). Continuing without $scmBoxName."
+                $forgejoLogHint = ''
+                if ($null -ne $forgejoLogPath -and (Test-Path -LiteralPath $forgejoLogPath)) {
+                    $forgejoLogHint = " Deploy log: $forgejoLogPath"
+                }
+                Write-Warning "Source-control subsystem deployment failed: $($_.Exception.Message). Continuing without $scmBoxName.$forgejoLogHint"
             }
             finally {
                 Set-StrictMode -Version Latest
@@ -1077,6 +1102,27 @@ Write-Progress `
     -Status          "100% complete ($total/$total)" `
     -PercentComplete 100 `
     -Completed
+
+# Restore Linux ownership on the published sandbox. The subsystem boxes are
+# built as the invoking non-root user (PostgreSQL refuses to run as root), but
+# Copy-Item above does not preserve owners, so the copied tree would be owned
+# by the (root) publisher and unusable at runtime by that user. Hand it back.
+if ($OperatingSystem -ne 'Windows') {
+    $idCommand = Get-Command id -CommandType Application -ErrorAction SilentlyContinue
+    $isRootPublish = ($null -ne $idCommand)
+    if ($isRootPublish) {
+        $currentUid = (& id -u 2>$null)
+        $isRootPublish = ($null -ne $currentUid -and "$currentUid".Trim() -eq '0')
+    }
+
+    if ($isRootPublish) {
+        $sandboxOwner = Get-LinuxSubsystemRunAsUser
+        if (-not [string]::IsNullOrWhiteSpace($sandboxOwner)) {
+            Write-Host "Setting sandbox ownership for '$sandboxOwner'..." -ForegroundColor DarkGray
+            & chown -R "${sandboxOwner}:${sandboxOwner}" $sandboxDirectory
+        }
+    }
+}
 
 # A staged PostgreSQL cluster is valid only if its required empty directories
 # also reached the published sandbox.
