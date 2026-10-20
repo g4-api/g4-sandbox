@@ -978,11 +978,37 @@ else {
                 Write-Host "Source-control box '$scmBoxName' deployed successfully." -ForegroundColor Green
             }
             catch {
+                # Drop the half-built box from the stage. The copy step below
+                # mirrors the stage tree wholesale, so a partially deployed box
+                # (binaries and data but no generated launcher) would otherwise be
+                # published and only fail much later, at sandbox runtime, as a
+                # confusing "box was not found" error.
+                $partialBoxRemoved = $false
+                if (Test-Path -LiteralPath $boxRoot) {
+                    try {
+                        Remove-Item `
+                            -LiteralPath $boxRoot `
+                            -Recurse `
+                            -Force `
+                            -ErrorAction Stop
+                        $partialBoxRemoved = $true
+                    }
+                    catch {
+                        $partialBoxRemoved = $false
+                    }
+                }
+
                 $forgejoLogHint = ''
                 if ($null -ne $forgejoLogPath -and (Test-Path -LiteralPath $forgejoLogPath)) {
                     $forgejoLogHint = " Deploy log: $forgejoLogPath"
                 }
-                Write-Warning "Source-control subsystem deployment failed: $($_.Exception.Message). Continuing without $scmBoxName.$forgejoLogHint"
+
+                $partialBoxHint = ''
+                if ($partialBoxRemoved) {
+                    $partialBoxHint = " The partially built '$scmBoxName' box was removed from the stage."
+                }
+
+                Write-Warning "Source-control subsystem deployment failed: $($_.Exception.Message). Continuing without $scmBoxName.$forgejoLogHint$partialBoxHint"
             }
             finally {
                 Set-StrictMode -Version Latest

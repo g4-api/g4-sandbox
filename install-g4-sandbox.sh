@@ -35,7 +35,33 @@ log() {
   printf '\n[+] %s\n' "$1"
 }
 
+# Publish writes a subsystem deploy log into its own work directory and then
+# deletes that directory at the end of every run, success or failure. Preserve
+# any such log next to the sandbox so a failed deployment stays inspectable
+# after the installer exits.
+preserve_deploy_logs() {
+  local logs_found
+  logs_found="$(find "$ROOT_WORK_DIR" -maxdepth 4 -name '*-deploy.log' -type f 2>/dev/null || true)"
+  [ -n "$logs_found" ] || return 0
+
+  local preserved_dir
+  preserved_dir="$OUTPUT_DIR/../$(basename "$OUTPUT_DIR")-publish-logs"
+  mkdir -p "$preserved_dir" 2>/dev/null || preserved_dir="$OUTPUT_DIR"
+
+  local log_file
+  while IFS= read -r log_file; do
+    [ -n "$log_file" ] || continue
+    cp -f "$log_file" "$preserved_dir/" 2>/dev/null || true
+  done <<<"$logs_found"
+
+  if [ -d "$preserved_dir" ]; then
+    log "Preserved deploy logs in $preserved_dir"
+    ls -1 "$preserved_dir" | sed 's/^/  /'
+  fi
+}
+
 cleanup() {
+  preserve_deploy_logs
   rm -rf "$ROOT_WORK_DIR"
 }
 
