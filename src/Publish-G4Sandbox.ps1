@@ -403,6 +403,7 @@ $archives = @(
 $vscodeExtensions = @(
     'echoapi.echoapi-for-vscode',
     "g4-api.g4-engine-client",
+    "g4-api.g4-test-wright",
     "github.copilot-chat",
     "jakubkozera.csharp-dev-tools",
     "jakubkozera.ms-sql-manager",
