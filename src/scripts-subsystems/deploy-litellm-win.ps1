@@ -1329,10 +1329,13 @@ function Test-TcpEndpoint {
         [int]$TimeoutMilliseconds = 1500
     )
 
+    # Bind addresses are not connectable targets; probe loopback instead.
+    $probeHost = switch ($TargetHost) { '0.0.0.0' { '127.0.0.1' } '::' { '::1' } default { $TargetHost } }
+
     $tcpClient = New-Object System.Net.Sockets.TcpClient
 
     try {
-        $connectResult = $tcpClient.BeginConnect($TargetHost, $Port, $null, $null)
+        $connectResult = $tcpClient.BeginConnect($probeHost, $Port, $null, $null)
         $connectedInTime = $connectResult.AsyncWaitHandle.WaitOne($TimeoutMilliseconds)
 
         if (-not $connectedInTime) {
@@ -1977,10 +1980,13 @@ function Test-TcpEndpoint {
         [int]$TimeoutMilliseconds = 1500
     )
 
+    # Bind addresses are not connectable targets; probe loopback instead.
+    $probeHost = switch ($TargetHost) { '0.0.0.0' { '127.0.0.1' } '::' { '::1' } default { $TargetHost } }
+
     $tcpClient = New-Object System.Net.Sockets.TcpClient
 
     try {
-        $connectResult = $tcpClient.BeginConnect($TargetHost, $Port, $null, $null)
+        $connectResult = $tcpClient.BeginConnect($probeHost, $Port, $null, $null)
         $connectedInTime = $connectResult.AsyncWaitHandle.WaitOne($TimeoutMilliseconds)
 
         if (-not $connectedInTime) {

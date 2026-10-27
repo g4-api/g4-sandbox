@@ -414,7 +414,25 @@ else {
 
 Write-Step 'Resolving and downloading the latest stable Gitea release'
 $giteaVersion = Get-LatestStableVersion -VersionUri 'https://dl.gitea.com/gitea/version.json'
-$giteaFileName = "gitea-$giteaVersion-windows-4.0-amd64.exe"
+# Gitea 28.x dropped the '4.0' Windows target token from asset names, so probe
+# the current name first and fall back to the legacy one.
+$giteaFileName = $null
+foreach ($giteaTarget in @('windows-amd64', 'windows-4.0-amd64')) {
+    $candidateName = "gitea-$giteaVersion-$giteaTarget.exe"
+    try {
+        Invoke-WebRequest -Uri "https://dl.gitea.com/gitea/$giteaVersion/$candidateName" -Method Head -UseBasicParsing | Out-Null
+        $giteaFileName = $candidateName
+        break
+    }
+    catch {
+        continue
+    }
+}
+
+if (-not $giteaFileName) {
+    throw "No Windows amd64 Gitea $giteaVersion asset was found at https://dl.gitea.com/gitea/$giteaVersion/"
+}
+
 $giteaBaseUri = "https://dl.gitea.com/gitea/$giteaVersion/$giteaFileName"
 
 Save-VerifiedDownload `
