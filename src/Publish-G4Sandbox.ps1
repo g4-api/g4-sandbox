@@ -762,8 +762,13 @@ else {
                 # the invoking non-root user. Windows deploys in-process.
                 $isLinuxVariable = Get-Variable -Name IsLinux -ErrorAction SilentlyContinue
                 $isLinuxHost = ($null -ne $isLinuxVariable -and [bool]$isLinuxVariable.Value)
-                $currentUid = (& id -u 2>$null)
-                $isRoot = ($isLinuxHost -and $null -ne $currentUid -and "$currentUid".Trim() -eq '0')
+                # 'id' is a Unix command; on Windows it exists only when Git's
+                # usr\bin happens to be on PATH, so it is queried on Linux only.
+                $isRoot = $false
+                if ($isLinuxHost) {
+                    $currentUid = (& id -u 2>$null)
+                    $isRoot = ($null -ne $currentUid -and "$currentUid".Trim() -eq '0')
+                }
 
                 if (-not $isRoot) {
                     & $deployScriptPath -Action Deploy -ContainerRoot $containerRoot
