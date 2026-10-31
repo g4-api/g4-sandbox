@@ -1135,6 +1135,38 @@ Write-Progress `
     -PercentComplete 100 `
     -Completed
 
+# Let Chrome's sandboxed processes read the published Chrome on Windows. Chrome
+# runs its network service in an app sandbox (AppContainer) that can read only
+# files granted to ALL APPLICATION PACKAGES (S-1-15-2-1) and ALL RESTRICTED
+# APPLICATION PACKAGES (S-1-15-2-2). Chrome's own installer grants both, but
+# Copy-Item above gives every file the permissions of its new parent folder, so
+# without this grant the network service cannot start and Chrome 156 and later
+# open every page blank. SIDs are used so the grant works in any Windows
+# language; (OI)(CI) makes files added later inherit it.
+if ($OperatingSystem -eq 'Windows') {
+    $publishedChromeDirectory = [System.IO.Path]::Combine($sandboxDirectory, "browsers", "chrome")
+
+    if (Test-Path -LiteralPath $publishedChromeDirectory -PathType Container) {
+        Write-Host "Granting Chrome sandbox read access to '$($publishedChromeDirectory)'..." -ForegroundColor DarkGray
+
+        $icaclsArguments = @(
+            $publishedChromeDirectory,
+            '/grant',
+            '*S-1-15-2-1:(OI)(CI)(RX)',
+            '*S-1-15-2-2:(OI)(CI)(RX)',
+            '/T',
+            '/C',
+            '/Q'
+        )
+        & icacls @icaclsArguments | Out-Null
+
+        # Fail the publish rather than ship a Chrome that cannot load any page.
+        if ($LASTEXITCODE -ne 0) {
+            throw "Chrome deployment failed: icacls could not grant sandbox read access to '$($publishedChromeDirectory)' (exit code $($LASTEXITCODE))."
+        }
+    }
+}
+
 # Restore Linux ownership on the published sandbox. The subsystem boxes are
 # built as the invoking non-root user (PostgreSQL refuses to run as root), but
 # Copy-Item above does not preserve owners, so the copied tree would be owned

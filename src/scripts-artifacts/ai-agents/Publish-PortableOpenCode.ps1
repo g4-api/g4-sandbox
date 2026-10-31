@@ -376,14 +376,7 @@ $partitionManifests = @{
         agents = @(
             'g4-explore-action', 'g4-explore-path-promoter', 'g4-explorer'
         )
-        skills = @(
-            'g4-explore-deploy-sandbox', 'g4-explore-promote-path', 'g4-explore-runtime',
-            'g4-locator-finder', 'g4-register-template', 'g4-start-session-uia',
-            'g4-visual-environment', 'g4-visual-ground', 'g4-visual-observe', 'g4-xpath-composer',
-            'manifest-create', 'manifest-description', 'manifest-enrichment', 'manifest-examples',
-            'manifest-final-review', 'manifest-parameters', 'manifest-pipeline', 'manifest-rag-qa',
-            'manifest-summary'
-        )
+        skills = @('windows-visual-testing', 'g4-visual-recording')
     }
     'g4-orchestrator' = @{
         agents = @(
@@ -391,17 +384,7 @@ $partitionManifests = @{
             'g4-capability-search', 'g4-execution-contract-validator', 'g4-intent-planner',
             'g4-orchestrator', 'g4-session-starter', 'g4-template-promoter'
         )
-        skills = @(
-            'g4-decompose-intent-to-actions', 'g4-deploy-sandbox', 'g4-execute-rule-by-intent',
-            'g4-locator-finder', 'g4-maintain-session-journal', 'g4-orchestrate-user-intent',
-            'g4-orchestrate-visual-grounding', 'g4-planner-execution-contract', 'g4-planner-worker-pool',
-            'g4-promote-flow-to-template', 'g4-register-template', 'g4-run-action-attempt',
-            'g4-start-session', 'g4-start-session-uia', 'g4-verify-action-result',
-            'g4-visual-environment', 'g4-visual-ground', 'g4-visual-observe', 'g4-xpath-composer',
-            'manifest-create', 'manifest-description', 'manifest-enrichment',
-            'manifest-examples', 'manifest-final-review', 'manifest-parameters', 'manifest-pipeline',
-            'manifest-rag-qa', 'manifest-summary', 'manifest-test-scripts'
-        )
+        skills = @('windows-visual-testing', 'g4-visual-recording')
     }
 }
 
