@@ -32,6 +32,18 @@ irm https://raw.githubusercontent.com/g4-api/g4-sandbox/main/install-g4-sandbox.
 curl -fsSL https://raw.githubusercontent.com/g4-api/g4-sandbox/main/install-g4-sandbox.sh | bash
 ```
 
+#### macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g4-api/g4-sandbox/main/install-g4-sandbox-osx.sh | bash
+```
+
+Run it as your normal user (not `sudo`). It needs only the stock macOS tools plus the Xcode Command Line Tools for `git` (`xcode-select --install`); Homebrew and a separately installed PowerShell are not required. The sandbox is published to `~/g4-sandbox`; pass another folder, or arguments for `Publish-G4Sandbox.ps1` after `--`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g4-api/g4-sandbox/main/install-g4-sandbox-osx.sh | bash -s -- --output-dir ~/g4 -- -SkipScm
+```
+
 The installer bootstraps a portable PowerShell runtime, pulls the repository, runs the sandbox publish script, and cleans up temporary bootstrap files when complete.
 
 The script assembles a deterministic, offline-ready runtime bundle that includes required runtimes, browsers, drivers, tools, and configuration assets — suitable for local execution, CI/CD pipelines, containers, and air-gapped environments.
@@ -264,7 +276,8 @@ The output directory will contain all required runtime assets.
 ## Compatibility Notes
 
 * Linux/macOS support is **x64 only**
-* ARM is not currently supported
+* ARM is not currently supported (on Apple Silicon the macOS sandbox runs under Rosetta 2)
+* `MacOs` publishes a reduced sandbox. These are omitted, together with their launchers: standalone Chrome for Testing and ChromeDriver, OpenJDK (and with it the Selenium Grid launchers), VS Code portable, MinGit, the LiteLLM and source-control subsystems, G4 Test Wright, and the Windows-only tools
 * Requires outbound network access during build
 * `tar` must be available for certain extractions
 * Helper functions must be loaded in scope

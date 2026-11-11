@@ -243,12 +243,28 @@ $driversDirectory   = Join-Path $stageDirectory "drivers"
 $runtimeDirectory   = Join-Path $stageDirectory "runtime"
 $utilitiesDirectory = Join-Path $stageDirectory "bot-utilities"
 
+# macOS publishes a reduced sandbox: utilities without a working macOS build (standalone Chrome for Testing and
+# ChromeDriver, VS Code portable, MinGit, the LiteLLM and source-control subsystems, Test Wright, Windows-only
+# tools) are omitted rather than shipped broken.
+$isMacOsTarget = $OperatingSystem -eq 'MacOs'
+
 # Resolve the Chromium recorder package from the same operating-system selection that drives Chrome and .NET.
 # Windows retains compatibility with legacy generic x64 releases while preferring the explicit platform suffix.
+# macOS takes the Intel build to match the bundled x64 .NET runtime that runs it (Rosetta 2 on Apple Silicon).
 $chromiumRecorderAssetPattern = switch ($OperatingSystem.ToLower()) {
     "windows" { "chromium-recorder\..*-(win-)?x64\.zip" }
     "linux"   { "chromium-recorder\..*-linux-x64\.tar\.gz" }
+    "macos"   { "chromium-recorder\..*-osx-x64\.tar\.gz" }
     default   { "chromium-recorder\..*-x64\.zip" }
+}
+
+# Resolve the Android recorder package the same way: it is a portable .NET host with the recorder APK inside, and
+# talks to devices through the adb of the Android SDK platform-tools, which the sandbox does not ship.
+$androidRecorderAssetPattern = switch ($OperatingSystem.ToLower()) {
+    "windows" { "android-recorder\..*-win-x64\.zip" }
+    "linux"   { "android-recorder\..*-linux-x64\.tar\.gz" }
+    "macos"   { "android-recorder\..*-osx-x64\.tar\.gz" }
+    default   { "android-recorder\..*-x64\.zip" }
 }
 
 # Tool definitions to download from GitHub releases.
@@ -317,8 +333,23 @@ $tools = @(
         WindowsOnly          = $true
     },
     @{
+        # SAP GUI Scripting recorder; SAP GUI exists only on Windows, so the release ships win-x64 only.
+        AssetPattern         = "sap-recorder\..*-win-x64\.zip"
+        DestinationDirectory = (Join-Path $utilitiesDirectory "sap-recorder-win-x64")
+        DestinationFile      = $null
+        GitHubRepository     = "$($baseGithubUrl)/g4-recorders"
+        WindowsOnly          = $true
+    },
+    @{
         AssetPattern         = $chromiumRecorderAssetPattern
         DestinationDirectory = (Join-Path $utilitiesDirectory "chromium-recorder-x64")
+        DestinationFile      = $null
+        GitHubRepository     = "$($baseGithubUrl)/g4-recorders"
+        WindowsOnly          = $false
+    },
+    @{
+        AssetPattern         = $androidRecorderAssetPattern
+        DestinationDirectory = (Join-Path $utilitiesDirectory "android-recorder-x64")
         DestinationFile      = $null
         GitHubRepository     = "$($baseGithubUrl)/g4-recorders"
         WindowsOnly          = $false
@@ -433,11 +464,6 @@ $nodejsDependencies = @(
 
 # Package OpenCode as a fully boxed runtime for both G4 agent partitions. Ripgrep is a required part of the
 # unit: OpenCode's glob and grep tools both resolve rg from PATH and would otherwise download it on first use.
-if ($OperatingSystem -eq 'MacOs') {
-    throw [System.PlatformNotSupportedException]::new(
-        'Portable OpenCode packaging currently supports Windows and Linux x64 targets only.')
-}
-
 & (Join-Path $scriptsArtifactsDirectory "ai-agents\Publish-PortableOpenCode.ps1") `
     -OperatingSystem $OperatingSystem `
     -ArchiveDirectory $workDirectory `
@@ -448,25 +474,32 @@ if ($OperatingSystem -eq 'MacOs') {
 # Notes:
 #   - Artifacts are stored under browsers/<os>/chrome and drivers/<os>/chrome
 #   - -Clean ensures deterministic rebuilds
-& (Join-Path $scriptsArtifactsDirectory "browsers\Get-ChromeArtifacts.ps1") `
-    -Version                    $ChromeVersion `
-    -OperatingSystem            $OperatingSystem `
-    -ArchiveDirectory           $workDirectory `
-    -ChromeDestinationDirectory ([System.IO.Path]::Combine($browsersDirectory, "chrome")) `
-    -DriverDestinationDirectory ([System.IO.Path]::Combine($driversDirectory, "chrome")) `
-    -Clean
-
-$chromeExecutableName = if ($OperatingSystem -eq "Windows") { "chrome.exe" } else { "chrome" }
-$driverExecutableName = if ($OperatingSystem -eq "Windows") { "chromedriver.exe" } else { "chromedriver" }
-$chromeExecutablePath = [System.IO.Path]::Combine($browsersDirectory, "chrome", $chromeExecutableName)
-$driverExecutablePath = [System.IO.Path]::Combine($driversDirectory, "chrome", $driverExecutableName)
-
-if (-not (Test-Path -LiteralPath $chromeExecutablePath -PathType Leaf)) {
-    throw "Chrome deployment failed: '$($chromeExecutablePath)' was not created."
+#   - macOS is omitted: Chrome for Testing ships there as an .app bundle whose framework links do not survive the
+#     archive extraction, and nothing in the sandbox resolves its bundle path; macOS uses the installed Chrome
+if ($isMacOsTarget) {
+    Write-Host "Skipping standalone Chrome for Testing and ChromeDriver (not supported on macOS)." -ForegroundColor DarkGray
 }
+else {
+    & (Join-Path $scriptsArtifactsDirectory "browsers\Get-ChromeArtifacts.ps1") `
+        -Version                    $ChromeVersion `
+        -OperatingSystem            $OperatingSystem `
+        -ArchiveDirectory           $workDirectory `
+        -ChromeDestinationDirectory ([System.IO.Path]::Combine($browsersDirectory, "chrome")) `
+        -DriverDestinationDirectory ([System.IO.Path]::Combine($driversDirectory, "chrome")) `
+        -Clean
 
-if (-not (Test-Path -LiteralPath $driverExecutablePath -PathType Leaf)) {
-    throw "ChromeDriver deployment failed: '$($driverExecutablePath)' was not created."
+    $chromeExecutableName = if ($OperatingSystem -eq "Windows") { "chrome.exe" } else { "chrome" }
+    $driverExecutableName = if ($OperatingSystem -eq "Windows") { "chromedriver.exe" } else { "chromedriver" }
+    $chromeExecutablePath = [System.IO.Path]::Combine($browsersDirectory, "chrome", $chromeExecutableName)
+    $driverExecutablePath = [System.IO.Path]::Combine($driversDirectory, "chrome", $driverExecutableName)
+
+    if (-not (Test-Path -LiteralPath $chromeExecutablePath -PathType Leaf)) {
+        throw "Chrome deployment failed: '$($chromeExecutablePath)' was not created."
+    }
+
+    if (-not (Test-Path -LiteralPath $driverExecutablePath -PathType Leaf)) {
+        throw "ChromeDriver deployment failed: '$($driverExecutablePath)' was not created."
+    }
 }
 
 # Download portable .NET runtime.
@@ -478,11 +511,20 @@ if (-not (Test-Path -LiteralPath $driverExecutablePath -PathType Leaf)) {
     -Clean
 
 # Download OpenJDK binaries.
-& (Join-Path $scriptsArtifactsDirectory "runtimes\Get-OpenJdkBinaries.ps1") `
-    -OperatingSystem      $OperatingSystem `
-    -ArchiveDirectory     $workDirectory `
-    -DestinationDirectory (Join-Path $runtimeDirectory "jdk") `
-    -Clean
+#
+# Notes:
+#   - macOS is omitted: current OpenJDK releases no longer ship a macOS x64 build, and the macOS archive is a
+#     .jdk bundle (Contents/Home) that does not match the runtime/jdk/bin/java layout the launchers use
+if ($isMacOsTarget) {
+    Write-Host "Skipping OpenJDK (not supported on macOS)." -ForegroundColor DarkGray
+}
+else {
+    & (Join-Path $scriptsArtifactsDirectory "runtimes\Get-OpenJdkBinaries.ps1") `
+        -OperatingSystem      $OperatingSystem `
+        -ArchiveDirectory     $workDirectory `
+        -DestinationDirectory (Join-Path $runtimeDirectory "jdk") `
+        -Clean
+}
 
 # Download Node.js runtime.
 & (Join-Path $scriptsArtifactsDirectory "runtimes\Get-NodeJs.ps1") `
@@ -498,18 +540,33 @@ if (-not (Test-Path -LiteralPath $driverExecutablePath -PathType Leaf)) {
 #     a bundled Git; the Linux/macOS provider script has not been added yet and
 #     the resolver warns and skips for those targets
 #   - Staged under 'runtime\git' so the published box can prepend its cmd\ folder
-& (Join-Path $scriptsArtifactsDirectory "runtimes\Get-MinGit.ps1") `
-    -OperatingSystem      $OperatingSystem `
-    -ArchiveDirectory     $workDirectory `
-    -DestinationDirectory (Join-Path $runtimeDirectory "git") `
-    -Clean
+#   - macOS is omitted: there is no provider, and the host's git (Xcode Command Line Tools) is used
+if ($isMacOsTarget) {
+    Write-Host "Skipping MinGit (not supported on macOS)." -ForegroundColor DarkGray
+}
+else {
+    & (Join-Path $scriptsArtifactsDirectory "runtimes\Get-MinGit.ps1") `
+        -OperatingSystem      $OperatingSystem `
+        -ArchiveDirectory     $workDirectory `
+        -DestinationDirectory (Join-Path $runtimeDirectory "git") `
+        -Clean
+}
 
 # Download VS Code portable build.
-& (Join-Path $scriptsArtifactsDirectory "ide\Get-VSCode.ps1") `
-    -OperatingSystem      $OperatingSystem `
-    -ArchiveDirectory     $workDirectory `
-    -DestinationDirectory (Join-Path $utilitiesDirectory "vs-code") `
-    -Clean
+#
+# Notes:
+#   - macOS is omitted: VS Code ships there as an .app bundle whose framework links do not survive the archive
+#     extraction, and portable mode works differently for it
+if ($isMacOsTarget) {
+    Write-Host "Skipping VS Code portable (not supported on macOS)." -ForegroundColor DarkGray
+}
+else {
+    & (Join-Path $scriptsArtifactsDirectory "ide\Get-VSCode.ps1") `
+        -OperatingSystem      $OperatingSystem `
+        -ArchiveDirectory     $workDirectory `
+        -DestinationDirectory (Join-Path $utilitiesDirectory "vs-code") `
+        -Clean
+}
 
 # Download the portable Windows Terminal build (Windows target only).
 #
@@ -659,6 +716,33 @@ foreach ($sandboxSource in $sandboxSources) {
         -Force
 }
 
+# macOS shares the Linux startup scripts; drop the ones whose subsystem or utility is omitted on macOS so the
+# sandbox root only offers launchers that can work there. start-dev-environment.sh is dropped as well: it needs
+# VS Code portable and a Linux terminal emulator.
+if ($isMacOsTarget) {
+    $unsupportedMacOsLaunchers = @(
+        'add-chrome-node.sh',
+        'start-chrome-node.sh',
+        'start-dev-environment.sh',
+        'start-forgejo.sh',
+        'start-grid-hub.sh',
+        'stop-forgejo.sh',
+        'start-litellm.sh',
+        'stop-litellm.sh',
+        'start-test-wright.sh',
+        'start-vscode.sh'
+    )
+
+    foreach ($launcherName in $unsupportedMacOsLaunchers) {
+        $launcherPath = Join-Path $stageDirectory $launcherName
+
+        if (Test-Path -LiteralPath $launcherPath -PathType Leaf) {
+            Write-Host "Omitting launcher '$($launcherName)' (not supported on macOS)." -ForegroundColor DarkGray
+            Remove-Item -LiteralPath $launcherPath -Force
+        }
+    }
+}
+
 # Install Node.js global dependencies into the bundled runtime.
 #
 # Notes:
@@ -693,7 +777,15 @@ if ($nodejsDependencies -and $nodejsDependencies.Count -gt 0) {
 
             # Invoke the bundled node against npm-cli.js to avoid relying on
             # shell shims or PATH. --prefix forces the install into the bundle.
-            & $nodeExecutable $npmCli install --global $dependency --prefix $nodejsRuntimeDirectory
+            # A bundled node built for another platform (cross-platform build)
+            # cannot start at all; that is a skip, like a missing runtime.
+            try {
+                & $nodeExecutable $npmCli install --global $dependency --prefix $nodejsRuntimeDirectory
+            }
+            catch {
+                Write-Warning "Bundled Node.js runtime cannot run on this host ($($_.Exception.Message)). Skipping Node.js dependency installation."
+                break
+            }
 
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "Failed to install Node.js dependency: '$($dependency)' (exit code: $($LASTEXITCODE))."
@@ -715,6 +807,9 @@ if ($nodejsDependencies -and $nodejsDependencies.Count -gt 0) {
 #   - Failures are non-fatal and only warn.
 if ($SkipLiteLLM) {
     Write-Host "Skipping the LiteLLM subsystem deployment (-SkipLiteLLM)." -ForegroundColor DarkGray
+}
+elseif ($isMacOsTarget) {
+    Write-Host "Skipping the LiteLLM subsystem deployment (not supported on macOS)." -ForegroundColor DarkGray
 }
 else {
     $deployScriptName = switch ($OperatingSystem.ToLowerInvariant()) {
@@ -860,6 +955,9 @@ else {
 #   - Failures are non-fatal and only warn.
 if ($SkipScm) {
     Write-Host "Skipping the source-control subsystem deployment (-SkipScm)." -ForegroundColor DarkGray
+}
+elseif ($isMacOsTarget) {
+    Write-Host "Skipping the source-control subsystem deployment (not supported on macOS)." -ForegroundColor DarkGray
 }
 else {
     switch ($OperatingSystem.ToLowerInvariant()) {
