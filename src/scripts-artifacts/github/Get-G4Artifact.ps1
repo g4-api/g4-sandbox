@@ -130,6 +130,14 @@ function Get-G4Artifact {
         }
         else {
             $asset = $response.assets | Where-Object { [Regex]::IsMatch($_.name, $AssetPattern) } | Select-Object -First 1
+
+            # A release without a matching asset (for example a platform drop not yet published) is skipped with
+            # a warning instead of failing the whole publish on a null property access.
+            if ($null -eq $asset) {
+                Write-Warning "Release '$($tagName)' has no asset matching '$($AssetPattern)'. Skipping."
+                return @{ Skipped = $true }
+            }
+
             $downloadUrl = $asset.browser_download_url
         }
 
@@ -173,6 +181,11 @@ function Get-G4Artifact {
         -GitHubRepository $GitHubRepository `
         -Tag              $Tag `
         -Token            $Token
+
+    # The resolver already warned that this release has no matching asset; skip the tool, not the publish.
+    if ($release -and $release.ContainsKey('Skipped')) {
+        return
+    }
 
     if (-not $release) {
         Write-Error "Failed to resolve GitHub release information for '$($GitHubRepository)'. Aborting artifact download."

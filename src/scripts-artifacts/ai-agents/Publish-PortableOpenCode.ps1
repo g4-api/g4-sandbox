@@ -35,7 +35,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)] [ValidateSet('Linux', 'Windows')] [string]$OperatingSystem,
+    [Parameter(Mandatory = $true)] [ValidateSet('Linux', 'MacOs', 'Windows')] [string]$OperatingSystem,
     [Parameter(Mandatory = $true)] [string]$ArchiveDirectory,
     [Parameter(Mandatory = $true)] [string]$StageDirectory
 )
@@ -350,12 +350,16 @@ function Copy-SelectedG4AiAssets {
 
 
 $isWindowsTarget = $OperatingSystem -eq 'Windows'
-$openCodeAssetName = if ($isWindowsTarget) { 'opencode-windows-x64.zip' } else { 'opencode-linux-x64.tar.gz' }
-$ripgrepAssetTemplate = if ($isWindowsTarget) {
-    'ripgrep-{0}-x86_64-pc-windows-msvc.zip'
+# Every target is x64, like the rest of the bundle; on Apple Silicon the macOS build runs under Rosetta 2.
+$openCodeAssetName = switch ($OperatingSystem) {
+    'Windows' { 'opencode-windows-x64.zip' }
+    'MacOs' { 'opencode-darwin-x64.zip' }
+    default { 'opencode-linux-x64.tar.gz' }
 }
-else {
-    'ripgrep-{0}-x86_64-unknown-linux-musl.tar.gz'
+$ripgrepAssetTemplate = switch ($OperatingSystem) {
+    'Windows' { 'ripgrep-{0}-x86_64-pc-windows-msvc.zip' }
+    'MacOs' { 'ripgrep-{0}-x86_64-apple-darwin.tar.gz' }
+    default { 'ripgrep-{0}-x86_64-unknown-linux-musl.tar.gz' }
 }
 $executableName = if ($isWindowsTarget) { 'opencode.exe' } else { 'opencode' }
 $ripgrepName = if ($isWindowsTarget) { 'rg.exe' } else { 'rg' }

@@ -77,16 +77,22 @@ $headers = @{
 #       * Windows: zip
 #       * macOS:   tar.gz
 #       * Linux:   tar.xz
+#   - $indexFileKey is the matching entry in a release's 'files' list in index.json; it is used to skip releases
+#     (for example nightlies listed at the top of the index) that do not ship a build for this platform.
 $assetSuffix = [string]::Empty
+$indexFileKey = [string]::Empty
 switch ($OperatingSystem.ToLower()) {
-    "macos" { 
+    "macos" {
         $assetSuffix = "darwin-x64.tar.gz"
+        $indexFileKey = "osx-x64-tar"
     }
     "linux" {
         $assetSuffix = "linux-x64.tar.xz"
+        $indexFileKey = "linux-x64"
     }
     default {
         $assetSuffix = "win-x64.zip"
+        $indexFileKey = "win-x64-zip"
     }
 }
 
@@ -176,7 +182,14 @@ if (-not $release) {
         Write-Host "No Node.js version provided. Using latest release from index.json." -ForegroundColor Cyan
     }
 
-    $release = $metadata[0]
+    $release = $metadata |
+    Where-Object { $_.PSObject.Properties['files'] -and (@($_.files) -contains $indexFileKey) } |
+    Select-Object -First 1
+
+    if (-not $release) {
+        Write-Warning "Node.js releases index has no release with a '$($indexFileKey)' build."
+        return
+    }
 }
 
 # Build the download URL for the selected OS and resolved version.
