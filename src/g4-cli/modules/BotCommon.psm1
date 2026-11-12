@@ -225,8 +225,9 @@ function New-BotConfiguration {
     # Scriptblock to constructs a bot monitor endpoint URL from a base callback URI and bot identifier.
     $formatCallback = {
         param(
-            [Uri]   $CallbackUri,  # The base URI to format (e.g. "https://example.com")
-            [string]$BotId         # The unique bot identifier to append to the path
+            [Uri]   $CallbackUri,                      # The base URI to format (e.g. "https://example.com")
+            [string]$BotId,                            # The unique bot identifier to append to the path
+            [string]$Path = "/bot/v1/monitor/$($BotId)" # The listener path; defaults to the callback (monitor) path
         )
 
         # Return null if no URI was provided
@@ -248,13 +249,13 @@ function New-BotConfiguration {
             $CallbackUri.Port
         }
 
-        # Test if the CallbackUri's port is available
-        $port = if (& $testPort -PortToTest $CallbackUri.Port) {
-            # Port is free�use the original CallbackUri port
-            $CallbackUri.Port
+        # Test if the resolved port is available; otherwise pick a free one
+        $port = if (& $testPort -PortToTest $port) {
+            # Port is free, keep the resolved port
+            $port
         }
         else {
-            Write-Log -Level Warning -Message "(New-BotConfiguration) Port $($CallbackUri.Port) isn't available right now; Picking a free one for you." -UseColor
+            Write-Log -Level Warning -Message "(New-BotConfiguration) Port $($port) isn't available right now; Picking a free one for you." -UseColor
             & $getFreePort
         }
 
@@ -269,8 +270,8 @@ function New-BotConfiguration {
             "$($botHost):$port"
         }
 
-        # Combine scheme, authority, and bot path into the final URL
-        return "$($scheme)://$($authority)/bot/v1/monitor/$($BotId)"
+        # Combine scheme, authority, and the listener path into the final URL
+        return "$($scheme)://$($authority)$($Path)"
     }
 
     # Imports environment settings from the specified file, with optional exclusions and additions.
@@ -305,7 +306,7 @@ function New-BotConfiguration {
 
     [Uri]$botEntryPointUri        = if(-not [string]::IsNullOrEmpty($EntryPointUri))     { [Uri]::new($EntryPointUri) }     else { $defaultEntryPointUri }
     [Uri]$botEntryPointIngress    = if(-not [string]::IsNullOrEmpty($EntryPointIngress)) { [Uri]::new($EntryPointIngress) } else { $defaultEntryPointUri }
-    $botEntryPointUriAbsolute     = & $formatCallback -EntryPointUri $botEntryPointUri     -BotId $botId
+    $botEntryPointUriAbsolute     = & $formatCallback -CallbackUri $botEntryPointUri -BotId $botId -Path "/bot/v1/$($BotName)"
     $botEntryPointIngressAbsolute = $botEntryPointIngress.AbsoluteUri.TrimEnd('/')
 
 

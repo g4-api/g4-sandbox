@@ -1,7 +1,9 @@
 version: "3.8"
 
+# TOKEN is substituted from the G4_LICENSE_TOKEN environment variable (or a .env next to this file).
+
 x-common-token: &common-token
-  TOKEN: "3xezq5Yc33laNOPNP8yCsK33vQcQZ87E/zyLNNscYNeqvKTHAm9C3wAEDQV7X9+fuuHPhafDNXbSFgsbKmCncCKm7DRE5A6JtFSd90DNujujbQ3vLG4/4uSVCR76Z6VguIDSvRZ/pJTHCzBc9NNI/eb5fLHcjXyYrilm9NC7VTD/HOlgGC5CL+oFhHoR8s10YuI9QpRioZbyDHysFumpAAv3/PG/p/QBKNoQpjtsUgMytrnqr3m1bgyXITG0u5AUR2VpZLCXQO6MxU7kwLwvdNGXUDfajBVT29KyjXUEWN9dK0R38XmgZFQ7orkKfN2z0x2SMfC5mvTDM6as+/kYWFAvpqOZDhZ95sgQWp/zGig="
+  TOKEN: "${G4_LICENSE_TOKEN}"
 
 services:
   volume-cleanup-bot-a:
@@ -21,7 +23,7 @@ services:
       CALLBACK_INGRESS: "http://host.docker.internal:49215"
       CALLBACK_URI: "http://host.docker.internal:49215"
       CLEANUP_BOT_INTERVAL_TIME: "5"
-      CLEANUP_BOT_NUNBER_OF_FILES: "3"
+      CLEANUP_BOT_NUMBER_OF_FILES: "3"
       HUB_URI: "http://host.docker.internal:9944"
 
     restart: unless-stopped
@@ -43,7 +45,7 @@ services:
       CALLBACK_INGRESS: "http://host.docker.internal:49216"
       CALLBACK_URI: "http://host.docker.internal:49216"
       CLEANUP_BOT_INTERVAL_TIME: "10"
-      CLEANUP_BOT_NUNBER_OF_FILES: "5"
+      CLEANUP_BOT_NUMBER_OF_FILES: "5"
       HUB_URI: "http://host.docker.internal:9944"
 
     restart: unless-stopped

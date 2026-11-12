@@ -1,5 +1,8 @@
 docker swarm init
 docker swarm update --task-history-limit=0
+# Export the license token first (never put it in the compose file):
+#   bash:       export G4_LICENSE_TOKEN="<token>"
+#   PowerShell: $env:G4_LICENSE_TOKEN = "<token>"
 docker stack deploy --compose-file post-http-listener-bot-compose.yml post-http-listener-bots
 docker service scale post-http-listener-bots_bot=5
 docker stack rm post-http-listener-bots

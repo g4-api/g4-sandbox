@@ -28,8 +28,7 @@ RUN mkdir -p /bots && chmod 777 /bots
 # Create a directory for your script
 WORKDIR /app
 
-# Copy the PowerShell script and .env file into the container
-COPY .env /app/.env
+# Copy the PowerShell script and modules into the container (never the .env file: it may hold the license token)
 COPY bot-root/Start-CronBot.ps1 /app/Start-CronBot.ps1
 COPY bot-root/modules /app/modules/
 
@@ -54,6 +53,15 @@ echo "TOKEN: ${TOKEN}"\n\
 \n\
 # Define the cron file name dynamically based on BOT_NAME\n\
 CRON_FILE="/etc/cron.d/${BOT_NAME}-cron"\n\
+\n\
+# Start from an empty cron file so a container restart does not duplicate the jobs\n\
+: > $CRON_FILE\n\
+\n\
+# Cron jobs do not inherit the container environment; pass the settings the runtime reads from env through the cron file\n\
+echo "SAVE_RESPONSE=${SAVE_RESPONSE:-True}" >> $CRON_FILE\n\
+echo "SAVE_ERRORS=${SAVE_ERRORS:-True}" >> $CRON_FILE\n\
+echo "G4_REGISTRATION_TIMEOUT=${G4_REGISTRATION_TIMEOUT:-60}" >> $CRON_FILE\n\
+echo "G4_WATCHDOG_INTERVAL=${G4_WATCHDOG_INTERVAL:-60}" >> $CRON_FILE\n\
 \n\
 # Create cron job file dynamically from the CRON_BOT_SCHEDULES environment variable\n\
 IFS="," read -ra SCHEDULES <<< "$CRON_BOT_SCHEDULES"\n\
