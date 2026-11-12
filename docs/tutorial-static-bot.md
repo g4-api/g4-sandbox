@@ -209,6 +209,9 @@ pwsh ./Start-StaticBot.ps1 -BotVolume "/path/to/bot-volume" -BotName "demo-bot" 
 
 ## Troubleshooting & Additional Notes
 
+- **No files in output or errors:**  
+  Files are only written when the environment variables `SAVE_RESPONSE` and `SAVE_ERRORS` are `True` (set them in the sandbox `.env` or pass them with `-e` in Docker mode).
+
 - **File Not Found:**  
   If **automation.json** is not found in the specified bot subdirectory, the script will wait for the next interval and then retry. Verify that the file exists and contains valid JSON.
 

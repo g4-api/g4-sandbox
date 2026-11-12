@@ -1533,7 +1533,7 @@ function Start-PartitionCleanupBotWizard {
     .NOTES
         The wizard uses the following environment variables if present:
           - BOT_VOLUME: Sets the initial value for the BotVolume parameter.
-          - CLEANUP_BOT_NUNBER_OF_FILES: Sets the initial value for NumberOfFilesToRetain.
+          - CLEANUP_BOT_NUMBER_OF_FILES: Sets the initial value for NumberOfFilesToRetain.
           - CLEANUP_BOT_INTERVAL_TIME: Sets the initial value for the IntervalTime.
     #>
     param(
@@ -1555,7 +1555,7 @@ function Start-PartitionCleanupBotWizard {
         [ordered]@{
             Default          = 3
             Description      = "The number of newest files to retain per target folder."
-            EnvironmentValue = $env:CLEANUP_BOT_NUNBER_OF_FILES
+            EnvironmentValue = $env:CLEANUP_BOT_NUMBER_OF_FILES
             Mandatory        = $true
             Name             = "NumberOfFilesToRetain"
             Type             = "Number"

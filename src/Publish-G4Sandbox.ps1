@@ -1439,10 +1439,14 @@ G4_LICENSE_TOKEN=
 G4_REGISTRATION_TIMEOUT=60
 G4_WATCHDOG_INTERVAL=60
 
-BOT_NAME
+BOT_NAME=
 BOT_VOLUME=$($BotVolume)
 
 DRIVER_BINARIES=
+
+# Bots only write output/ and errors/ files when these are True
+SAVE_RESPONSE=True
+SAVE_ERRORS=True
 "@
 
 $envFile | Set-Content -Path (Join-Path $sandboxDirectory ".env") -Encoding UTF8

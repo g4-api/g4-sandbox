@@ -202,6 +202,9 @@ pwsh ./Start-CronBot.ps1 -BotVolume "/path/to/bot-volume" -BotName "demo-bot" -C
 
 ## Troubleshooting & Additional Notes
 
+- **No files in output or errors:**  
+  Files are only written when the environment variables `SAVE_RESPONSE` and `SAVE_ERRORS` are `True` (set them in the sandbox `.env` or pass them with `-e` in Docker mode).
+
 - **Missing or Invalid automation.json:**  
   Ensure that the file exists in the `bot` subdirectory and that it contains valid JSON.
 

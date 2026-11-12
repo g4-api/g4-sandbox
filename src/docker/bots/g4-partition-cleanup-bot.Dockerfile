@@ -31,7 +31,7 @@ RUN echo "BOT_ID: ${BOT_ID}" && \
     echo "CALLBACK_URI: ${CALLBACK_URI}" && \
     echo "HUB_URI: ${HUB_URI}" && \
     echo "INTERVAL_TIME: ${CLEANUP_BOT_INTERVAL_TIME}" && \
-    echo "NUNBER_OF_FILES: ${CLEANUP_BOT_NUNBER_OF_FILES}" && \
+    echo "NUMBER_OF_FILES: ${CLEANUP_BOT_NUMBER_OF_FILES}" && \
     echo "TOKEN: ${TOKEN}"
 
 # Create the /bots directory and ensure it has read/write permissions
@@ -40,8 +40,7 @@ RUN mkdir -p /bots && chmod 777 /bots
 # Create a directory for your script
 WORKDIR /app
 
-# Copy the PowerShell script and .env file into the container
-COPY .env /app/.env
+# Copy the PowerShell script and modules into the container (never the .env file: it may hold the license token)
 COPY bot-root/Start-CleanupBot.ps1 /app/Start-CleanupBot.ps1
 COPY bot-root/modules /app/modules/
 
@@ -56,5 +55,5 @@ ENTRYPOINT pwsh -NoLogo -File ./Start-CleanupBot.ps1 \
   -CallbackUri           "$CALLBACK_URI" \
   -HubUri                "$HUB_URI" \
   -IntervalTime          $CLEANUP_BOT_INTERVAL_TIME \
-  -NumberOfFilesToRetain $CLEANUP_BOT_NUNBER_OF_FILES \
+  -NumberOfFilesToRetain $CLEANUP_BOT_NUMBER_OF_FILES \
   -Token                 "$TOKEN"

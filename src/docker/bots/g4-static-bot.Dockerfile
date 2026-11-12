@@ -41,8 +41,7 @@ RUN mkdir -p /bots && chmod 777 /bots
 # Create a directory for your script
 WORKDIR /app
 
-# Copy the PowerShell script and .env file into the container
-COPY .env /app/.env
+# Copy the PowerShell script and modules into the container (never the .env file: it may hold the license token)
 COPY bot-root/Start-StaticBot.ps1 /app/Start-StaticBot.ps1
 COPY bot-root/modules /app/modules/
 

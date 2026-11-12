@@ -30,7 +30,6 @@ $botConfiguration = New-BotConfiguration `
     -BotVolume           $BotVolume `
     -CallbackIngress     $CallbackIngress `
     -CallbackUri         $CallbackUri `
-    -DriverBinaries      $DriverBinaries `
     -EnvironmentFilePath (Join-Path $PSScriptRoot "../.env") `
     -HubUri              $HubUri `
     -Token               $Token
@@ -48,7 +47,7 @@ if ($Docker) {
             " -e CALLBACK_INGRESS=`"$($botConfiguration.Endpoints.BotCallbackIngress)`""
             " -e CALLBACK_URI=`"$($botConfiguration.Endpoints.BotCallbackUri)`""
             " -e CLEANUP_BOT_INTERVAL_TIME=`"$($IntervalTime)`""
-            " -e CLEANUP_BOT_NUNBER_OF_FILES=$($NumberOfFilesToRetain)"
+            " -e CLEANUP_BOT_NUMBER_OF_FILES=$($NumberOfFilesToRetain)"
             " -e HUB_URI=`"$($botConfiguration.Endpoints.HubUri)`""
             " -e TOKEN=`"$($botConfiguration.Metadata.Token)`""
         )
