@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
-    Packages a fully boxed, portable OpenCode runtime for both G4 agent
-    partitions (g4-explorer, g4-orchestrator).
+    Packages a fully boxed, portable OpenCode runtime for the G4 agent
+    partition (g4-explorer).
 
 .DESCRIPTION
     Standalone deployment script extracted from Publish-G4Sandbox.ps1.
@@ -14,12 +14,13 @@
       agents/skills directories and a warning is emitted
     - Boxes OpenCode + ripgrep + selected agents/skills under
       '<stage>/ai-agents/partitions/<partition>/opencode'
-    - Writes per-partition 'ai-assets.json' and 'opencode.json' config
+    - Writes per-partition 'ai-assets.json' and 'opencode.json' config; an
+      empty 'agents' or 'skills' list installs none of that kind, and only a
+      missing key installs every asset of that kind from the release
     - Generates OS-specific launcher scripts (start.cmd/.sh, start-opencode.cmd/.sh)
       that box environment variables (HOME, APPDATA, XDG_*, etc.) so the
       runtime never touches locations outside the sandbox
-    - Generates a sandbox-root launcher that defaults to 'g4-explorer' and
-      accepts an explicit partition name as its first argument
+    - Generates a sandbox-root launcher that starts the 'g4-explorer' partition
 
     This script is fully self-contained: it embeds its own copies of the
     GitHub asset resolution/verification/extraction helpers, so it can run
@@ -325,8 +326,13 @@ function Copy-SelectedG4AiAssets {
     New-Item -ItemType Directory -Path $agentsDestination -Force | Out-Null
     New-Item -ItemType Directory -Path $skillsDestination -Force | Out-Null
 
+    # An explicit empty list is a deliberate "install none" request; only an absent key means "install every
+    # asset of that kind", so a partition can ship skills without inheriting every agent in the release.
     $agentNames = @($Manifest.agents)
-    if ($agentNames.Count -eq 0) { $agentNames = @($Inventory.Agents.Keys | Sort-Object) }
+    if (-not $Manifest.ContainsKey('agents')) {
+        $agentNames = @($Inventory.Agents.Keys | Sort-Object)
+    }
+
     foreach ($name in $agentNames) {
         $key = ([string]$name).ToLowerInvariant()
         if (-not $Inventory.Agents.ContainsKey($key)) {
@@ -337,7 +343,10 @@ function Copy-SelectedG4AiAssets {
     }
 
     $skillNames = @($Manifest.skills)
-    if ($skillNames.Count -eq 0) { $skillNames = @($Inventory.Skills.Keys | Sort-Object) }
+    if (-not $Manifest.ContainsKey('skills')) {
+        $skillNames = @($Inventory.Skills.Keys | Sort-Object)
+    }
+
     foreach ($name in $skillNames) {
         $key = ([string]$name).ToLowerInvariant()
         if (-not $Inventory.Skills.ContainsKey($key)) {
@@ -375,20 +384,30 @@ if ([string]::IsNullOrWhiteSpace($githubToken)) {
         'private g4-ai-assets release will not be downloaded.')
 }
 
+# The sandbox ships a single partition. Its skills are listed by exact name (never wildcards) so every build
+# installs a reviewed, reproducible set; the empty agents list installs no agents at all.
 $partitionManifests = @{
     'g4-explorer' = @{
-        agents = @(
-            'g4-explore-action', 'g4-explore-path-promoter', 'g4-explorer'
+        agents = @()
+        skills = @(
+            'g4-bot-builder',
+            'g4-resolve-tools',
+            'g4-test-builder',
+            'g4-visual-recording',
+            'g4-web-scraping',
+            'g4-promote-flow-to-template',
+            'manifest-create',
+            'manifest-description',
+            'manifest-enrichment',
+            'manifest-examples',
+            'manifest-final-review',
+            'manifest-parameters',
+            'manifest-pipeline',
+            'manifest-rag-qa',
+            'manifest-summary',
+            'manifest-test-scripts',
+            'windows-visual-testing'
         )
-        skills = @('windows-visual-testing', 'g4-visual-recording')
-    }
-    'g4-orchestrator' = @{
-        agents = @(
-            'g4-action-attempt', 'g4-action-tool-discovery', 'g4-action-tool-selector',
-            'g4-capability-search', 'g4-execution-contract-validator', 'g4-intent-planner',
-            'g4-orchestrator', 'g4-session-starter', 'g4-template-promoter'
-        )
-        skills = @('windows-visual-testing', 'g4-visual-recording')
     }
 }
 
@@ -432,7 +451,7 @@ try {
     }
 
     $partitionsRoot = [System.IO.Path]::Combine($StageDirectory, 'ai-agents', 'partitions')
-    foreach ($partitionName in @('g4-explorer', 'g4-orchestrator')) {
+    foreach ($partitionName in @($partitionManifests.Keys)) {
         $partitionRoot = Join-Path $partitionsRoot $partitionName
         $boxRoot = Join-Path $partitionRoot 'opencode'
         $binRoot = [System.IO.Path]::Combine($boxRoot, 'runtime', 'bin')
@@ -458,7 +477,7 @@ try {
         $config = [ordered]@{
             '$schema' = 'https://opencode.ai/config.json'
             model = 'local-gemma/gemma4'
-            default_agent = $partitionName
+            # No default_agent: the partition ships no agents, so OpenCode starts on its built-in agent.
             provider = [ordered]@{
                 'local-gemma' = [ordered]@{
                     npm = '@ai-sdk/openai-compatible'
@@ -569,13 +588,6 @@ exec "$PARTITION_ROOT/opencode/start.sh" --auto "$@"
 setlocal
 set "SANDBOX_ROOT=%~dp0"
 set "PARTITION=g4-explorer"
-if /i "%~1"=="g4-explorer" (
-set "PARTITION=%~1"
-shift
-) else if /i "%~1"=="g4-orchestrator" (
-set "PARTITION=%~1"
-shift
-)
 call "%SANDBOX_ROOT%ai-agents\partitions\%PARTITION%\start-opencode.cmd" %*
 exit /b %ERRORLEVEL%
 '@
@@ -587,7 +599,6 @@ exit /b %ERRORLEVEL%
 set -eu
 SANDBOX_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PARTITION=g4-explorer
-if [ "${1:-}" = g4-explorer ] || [ "${1:-}" = g4-orchestrator ]; then PARTITION=$1; shift; fi
 exec "$SANDBOX_ROOT/ai-agents/partitions/$PARTITION/start-opencode.sh" "$@"
 '@
         Set-Content -LiteralPath (Join-Path $StageDirectory 'start-opencode.sh') -Value $rootLauncher -Encoding ASCII
