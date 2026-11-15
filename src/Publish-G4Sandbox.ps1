@@ -341,6 +341,23 @@ $tools = @(
         WindowsOnly          = $true
     },
     @{
+        # SAP GUI Scripting WebDriver server; it sits beside the UIA driver server because both are drivers.
+        # The digit after the name keeps the pattern off the Inspector asset, which shares the same prefix.
+        AssetPattern         = "Sap\.DriverServer\.\d.*-win-x64\.zip"
+        DestinationDirectory = (Join-Path $driversDirectory "sap-driver-server")
+        DestinationFile      = $null
+        GitHubRepository     = "$($baseGithubUrl)/sap-driver-server"
+        WindowsOnly          = $true
+    },
+    @{
+        # SAP GUI element inspector; the UIA counterpart (Accessibility Insights) is a utility, so this one is too.
+        AssetPattern         = "Sap\.DriverServer\.Inspector\..*-win-x64\.zip"
+        DestinationDirectory = (Join-Path $utilitiesDirectory "sap-inspector-win-x64")
+        DestinationFile      = $null
+        GitHubRepository     = "$($baseGithubUrl)/sap-driver-server"
+        WindowsOnly          = $true
+    },
+    @{
         AssetPattern         = $chromiumRecorderAssetPattern
         DestinationDirectory = (Join-Path $utilitiesDirectory "chromium-recorder-x64")
         DestinationFile      = $null
@@ -462,7 +479,7 @@ $nodejsDependencies = @(
     "allure"
 )
 
-# Package OpenCode as a fully boxed runtime for both G4 agent partitions. Ripgrep is a required part of the
+# Package OpenCode as a fully boxed runtime for the G4 agent partition (g4-explorer). Ripgrep is a required part of the
 # unit: OpenCode's glob and grep tools both resolve rg from PATH and would otherwise download it on first use.
 & (Join-Path $scriptsArtifactsDirectory "ai-agents\Publish-PortableOpenCode.ps1") `
     -OperatingSystem $OperatingSystem `
