@@ -13,6 +13,8 @@ services:
     depends_on:
       router:
         condition: service_healthy
+      chromium-recorder:
+        condition: service_healthy
 
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:9944/api/v4/g4/ping | grep -q Pong || exit 1" ]
@@ -138,8 +140,8 @@ services:
       - SE_NODE_SESSION_TIMEOUT=${NODE_SESSION_TIMEOUT:-300}
       - SE_NODE_OVERRIDE_MAX_SESSIONS=true
 
-      # Advertise 5 identical chrome slots
-      - SE_NODE_STEREOTYPE={"browserName":"chrome","platformName":"linux"}
+      # The image builds the node stereotype itself: it starts Chrome through the wrapper that adds
+      # --no-sandbox. Setting SE_NODE_STEREOTYPE here replaces it and Chrome then exits at launch.
       - SE_NODE_MAX_INSTANCES=5
 
       - SE_SCREEN_WIDTH=1920
@@ -156,6 +158,28 @@ services:
     environment:
       - DISPLAY_CONTAINER_NAME=chrome
       - SE_VIDEO_FILE_NAME=auto
+
+  # G4 Chromium recorder: the recorder host plus the Chrome it records, in one container.
+  # Watch and drive the browser at http://localhost:7901 (noVNC) or with a VNC client on port 5901.
+  # The Hub reaches the recorder at http://chromium-recorder:9956.
+  chromium-recorder:
+    image: g4api/g4-chromium-recorder:${G4_RECORDER_VERSION:-latest}
+    restart: unless-stopped
+    networks: [ g4 ]
+    shm_size: 2gb
+    ports:
+      - "9956:9956" # Recorder API and SignalR hub
+      - "7901:7900" # noVNC (browser based viewer)
+      - "5901:5900" # VNC
+    environment:
+      - SE_SCREEN_WIDTH=1920
+      - SE_SCREEN_HEIGHT=1080
+      - SE_VNC_NO_PASSWORD=1
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:9956/api/v4/g4/recorders/chromium/ping || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
 networks:
   g4:

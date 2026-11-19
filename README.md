@@ -5,6 +5,7 @@ A fully portable sandbox builder for the **G4™ automation ecosystem**.
 ## 📚 Table of Contents
 
 * [One-line installation](#one-line-installation)
+* [Docker sandbox](#-docker-sandbox)
 * [Overview](#-overview)
 * [Features](#-features)
 * [Requirements](#-requirements)
@@ -47,6 +48,61 @@ curl -fsSL https://raw.githubusercontent.com/g4-api/g4-sandbox/main/install-g4-s
 The installer bootstraps a portable PowerShell runtime, pulls the repository, runs the sandbox publish script, and cleans up temporary bootstrap files when complete.
 
 The script assembles a deterministic, offline-ready runtime bundle that includes required runtimes, browsers, drivers, tools, and configuration assets — suitable for local execution, CI/CD pipelines, containers, and air-gapped environments.
+
+---
+
+## 🐳 Docker sandbox
+
+Runs the G4™ services as containers instead of a portable folder. It needs only Docker with the Compose plugin (Docker Desktop on Windows, Docker Engine on Linux); nothing is cloned or installed.
+
+### One-line deployment
+
+#### Windows
+
+```powershell
+irm https://raw.githubusercontent.com/g4-api/g4-sandbox/main/src/docker-compose/docker-compose.yml | docker compose -p g4-sandbox -f - up -d --pull always
+```
+
+#### Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/g4-api/g4-sandbox/main/src/docker-compose/docker-compose.yml | docker compose -p g4-sandbox -f - up -d --pull always
+```
+
+The command reads the compose file straight from the repository, pulls the images, and starts the stack in the background. Run the same command again to update to the newest images.
+
+### What it starts
+
+| Service | Address on the host | Purpose |
+| --- | --- | --- |
+| G4™ Hub | `http://localhost:9944` | Automation engine, API, and MCP |
+| Selenium Grid | `http://localhost:4444` | Runs browser automations on Chrome nodes |
+| Chromium recorder | `http://localhost:9956` | Recorder API |
+| Recording browser | `http://localhost:7901` | The browser being recorded, shown in your browser (noVNC); a VNC client can use port `5901` |
+
+The recorded browser runs inside the recorder container, so you watch and drive it through the recording browser page, not a window on your desktop.
+
+Inside the stack the services reach each other by name: the Hub uses `http://router:4444/wd/hub` for the Grid and `http://chromium-recorder:9956` for the recorder. Use these names, not `localhost`, in settings the Hub reads. In VS Code, choose **Docker Sandbox** when you create a new project and these values are filled in for you.
+
+### Options
+
+Set a variable before the command to change a default.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SE_VERSION` | `latest` | Selenium Grid image tag |
+| `G4_RECORDER_VERSION` | `latest` | Chromium recorder image tag |
+| `NODE_MAX_SESSIONS` | `1` | Sessions one Chrome node runs at once |
+
+To run more Chrome nodes, add `--scale chrome=3` to the end of the command.
+
+### Stop and remove
+
+```bash
+docker compose -p g4-sandbox down
+```
+
+The host ports `9944`, `4444`, `9956`, `7901`, and `5901` must be free before you start, along with the Grid event ports `4442`, `4443`, and `5557`; stop a local Hub or Grid that uses them first.
 
 ---
 
