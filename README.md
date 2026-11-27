@@ -13,6 +13,8 @@ A fully portable sandbox builder for the **G4™ automation ecosystem**.
 * [PowerShell Installation (macOS/Linux)](#-powershell-installation-macoslinux)
 * [Usage](#usage)
 * [LiteLLM Subsystem](#-litellm-subsystem)
+* [Appium Server](#-appium-server)
+* [Windows Firewall Rules](#-windows-firewall-rules)
 * [Output](#-output)
 * [Compatibility Notes](#compatibility-notes)
 * [License](#-license)
@@ -313,6 +315,42 @@ Start/stop the proxy from the sandbox root:
 The proxy configuration is created once at `litellm/state/config.yaml` and is never overwritten afterwards, so hand-edited `model_list` entries survive. Models can also be managed from the admin UI, because `STORE_MODEL_IN_DB` is enabled by default.
 
 > **Note:** The upstream inference server is **not** deployed. The default configuration expects an OpenAI-compatible endpoint to be reachable at `http://127.0.0.1:8000/v1`.
+
+---
+
+## 📱 Appium Server
+
+The sandbox ships a portable Appium server for G4 Android sessions. The builder installs the latest `appium` package into the bundled Node.js runtime and the latest UiAutomator2 driver that fits it into `appium-home/` at the sandbox root. Nothing is installed globally, and Appium's drivers stay out of the user profile.
+
+Start the server from the sandbox root. It listens on Appium's default address and port (`0.0.0.0:4723`), and any arguments go to Appium:
+
+```powershell
+# Windows
+.\start-appium.cmd
+```
+
+```bash
+# Linux and macOS
+./start-appium.sh
+```
+
+The launchers set `APPIUM_HOME` to `appium-home/` and `JAVA_HOME` to the bundled JDK when it is not already set. The UiAutomator2 driver needs the Android SDK (`adb`), which the sandbox does not ship: set `ANDROID_HOME` or `ANDROID_SDK_ROOT` before starting. The launcher warns when neither is set.
+
+---
+
+## 🔥 Windows Firewall Rules
+
+Windows asks whether to allow a program the first time that program listens on a network port. Every sandbox version installs into its own folder, so without rules these prompts come back with every release, and an unanswered prompt covers the screen that UI automation drives.
+
+On Windows, the builder therefore adds an inbound allow rule for each sandbox program that opens a port: the .NET host, the driver and tool executables, Java, Node.js, Chrome, ChromeDriver, VS Code, the LiteLLM Python runtime, Gitea and OpenCode. Each rule names the exact program path, because Windows Firewall does not accept wildcards in program paths, and covers every network profile. The rules of one sandbox share the group `G4 Sandbox (<sandbox folder>)`.
+
+Each run also removes the earlier rules for programs in the same folder, including rules created by answering a prompt, and the rules of `g4-sandbox-*` folders that no longer exist beside it.
+
+Changing firewall rules requires administrator rights. When the builder is not elevated, Windows asks for one User Account Control consent during the install. Run the installer from an elevated PowerShell to skip that consent. If the consent is declined, the install still completes; add the rules later from the sandbox root:
+
+```powershell
+.\set-firewall-rules.cmd
+```
 
 ---
 
