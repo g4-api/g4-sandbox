@@ -475,8 +475,11 @@ $vscodeExtensions = @(
 # Notes:
 #   - Installed globally into runtime/nodejs via the bundled npm
 #   - Entries may be bare ("allure") or version-pinned ("allure@2.32.0")
+#   - appium is the server for G4 Android sessions; its UiAutomator2 driver is installed into the sandbox's
+#     appium-home after this list, and start-appium.cmd / start-appium.sh start it
 $nodejsDependencies = @(
-    "allure"
+    "allure",
+    "appium"
 )
 
 # Package OpenCode as a fully boxed runtime for the G4 agent partition (g4-explorer). Ripgrep is a required part of the
@@ -811,6 +814,67 @@ if ($nodejsDependencies -and $nodejsDependencies.Count -gt 0) {
                 Write-Host "Installed Node.js dependency: '$($dependency)'" -ForegroundColor Cyan
             }
         }
+    }
+}
+
+# Install the Appium UiAutomator2 driver into the sandbox's own Appium home.
+#
+# Notes:
+#   - Appium keeps its drivers in APPIUM_HOME (default: ~/.appium). The stage gets an 'appium-home' folder, so the
+#     driver travels with the sandbox and nothing is written to the user profile; start-appium.cmd and
+#     start-appium.sh set the same APPIUM_HOME when they start the server.
+#   - Appium installs a driver with npm, so the bundled Node.js folder is put first on PATH for this process only
+#     and PATH is restored afterwards.
+#   - The latest driver that fits the installed Appium is installed; nothing is pinned.
+#   - Skipped with a warning when Appium is missing or the bundled node cannot run on this host (cross-platform
+#     build); a failed install only warns.
+$appiumNodeDirectory = Join-Path $runtimeDirectory "nodejs"
+
+if ($OperatingSystem -eq "Windows") {
+    $appiumNodeExecutable = Join-Path $appiumNodeDirectory "node.exe"
+    $appiumNodeBinDirectory = $appiumNodeDirectory
+    $appiumMainScript = [System.IO.Path]::Combine($appiumNodeDirectory, "node_modules", "appium", "index.js")
+}
+else {
+    $appiumNodeExecutable = [System.IO.Path]::Combine($appiumNodeDirectory, "bin", "node")
+    $appiumNodeBinDirectory = Join-Path $appiumNodeDirectory "bin"
+    $appiumMainScript = [System.IO.Path]::Combine($appiumNodeDirectory, "lib", "node_modules", "appium", "index.js")
+}
+
+if (-not (Test-Path -LiteralPath $appiumNodeExecutable) -or -not (Test-Path -LiteralPath $appiumMainScript)) {
+    Write-Warning "Appium was not installed into the bundled Node.js runtime ('$($appiumMainScript)'). Skipping the UiAutomator2 driver."
+}
+else {
+    $appiumHomeDirectory = Join-Path $stageDirectory "appium-home"
+    New-Item -ItemType Directory -Path $appiumHomeDirectory -Force | Out-Null
+
+    # Capture the process environment that the install changes, so the rest of the publish keeps the caller's.
+    $originalAppiumHome = [System.Environment]::GetEnvironmentVariable('APPIUM_HOME', 'Process')
+    $originalPath = [System.Environment]::GetEnvironmentVariable('PATH', 'Process')
+
+    try {
+        [System.Environment]::SetEnvironmentVariable('APPIUM_HOME', $appiumHomeDirectory, 'Process')
+        [System.Environment]::SetEnvironmentVariable('PATH', ($appiumNodeBinDirectory + [System.IO.Path]::PathSeparator + $originalPath), 'Process')
+
+        Write-Host "Installing the Appium UiAutomator2 driver into '$($appiumHomeDirectory)'..." -ForegroundColor DarkGray
+        $appiumArguments = @($appiumMainScript, 'driver', 'install', 'uiautomator2')
+        & $appiumNodeExecutable @appiumArguments
+        $appiumExitCode = $LASTEXITCODE
+
+        if ($appiumExitCode -ne 0) {
+            Write-Warning "Failed to install the Appium UiAutomator2 driver (exit code: $($appiumExitCode))."
+        }
+        else {
+            Write-Host "Installed the Appium UiAutomator2 driver." -ForegroundColor Cyan
+        }
+    }
+    catch {
+        Write-Warning "Bundled Node.js runtime cannot run Appium on this host ($($_.Exception.Message)). Skipping the UiAutomator2 driver."
+    }
+    finally {
+        # Restore the caller's environment for the remaining publish steps.
+        [System.Environment]::SetEnvironmentVariable('APPIUM_HOME', $originalAppiumHome, 'Process')
+        [System.Environment]::SetEnvironmentVariable('PATH', $originalPath, 'Process')
     }
 }
 
@@ -1279,6 +1343,35 @@ if ($OperatingSystem -eq 'Windows') {
         if ($LASTEXITCODE -ne 0) {
             throw "Chrome deployment failed: icacls could not grant sandbox read access to '$($publishedChromeDirectory)' (exit code $($LASTEXITCODE))."
         }
+    }
+}
+
+# Allow the published sandbox's programs through Windows Firewall on a Windows host.
+#
+# Notes:
+#   - Every sandbox version lives in its own folder, so without rules Windows asks to allow each program the first
+#     time it listens, and an unanswered prompt covers the screen that UI automation drives.
+#   - Set-SandboxFirewallRule.ps1 (published in bot-utilities/scripts) adds exact-path rules for the programs that
+#     open ports, replaces the earlier rules of this folder and of the staging Gitea, and removes the rules of
+#     sandbox folders that no longer exist.
+#   - Changing firewall rules needs administrator rights; a publish that is not elevated starts the script
+#     elevated, so Windows asks for one User Account Control consent.
+#   - A declined consent or a failure only warns; set-firewall-rules.cmd in the sandbox root repeats the step.
+$isWindowsHost = $env:OS -eq 'Windows_NT'
+
+if ($OperatingSystem -eq 'Windows' -and $isWindowsHost) {
+    $firewallScriptPath = [System.IO.Path]::Combine($sandboxDirectory, "bot-utilities", "scripts", "Set-SandboxFirewallRule.ps1")
+
+    Write-Host "Adding Windows Firewall rules for the sandbox programs (Windows asks for administrator consent once)..." -ForegroundColor DarkGray
+
+    try {
+        $firewallSummary = & $firewallScriptPath -SandboxDirectory $sandboxDirectory -StageDirectory $stageDirectory
+        $firewallProgramCount = @($firewallSummary.AddedPrograms).Count
+        Write-Host "Windows Firewall: $($firewallProgramCount) program rules in '$($firewallSummary.Group)'; $($firewallSummary.RemovedRuleCount) earlier rules removed." -ForegroundColor Cyan
+    }
+    catch {
+        Write-Warning "Windows Firewall rules were not added: $($_.Exception.Message)"
+        Write-Warning "Windows may ask to allow sandbox programs. Run set-firewall-rules.cmd in '$($sandboxDirectory)' to add the rules."
     }
 }
 
