@@ -26,6 +26,7 @@ param(
     # Notes:
     #   - Expected format: "22.11.0" (no leading "v")
     #   - The function will match against "v22.11.0" in index.json
+    #   - When empty or not found, the latest LTS release is used (never a pre-release or Current release)
     [string]$Version,
 
     # When specified, removes the destination directory before extraction.
@@ -109,7 +110,7 @@ New-Item -Path $DestinationDirectory -ItemType Directory -Force | Out-Null
 #
 # Notes:
 #   - index.json contains an array of release objects (version, files, LTS flag, etc.)
-#   - We use it to resolve the requested version or fall back to the latest
+#   - We use it to resolve the requested version or fall back to the latest LTS release
 Write-Host "Retrieving Node.js releases index: $($nodejsIndexUrl)" -ForegroundColor DarkGray
 
 $response = Invoke-WebRequest `
@@ -147,8 +148,7 @@ if (-not $metadata -or ($metadata.Length -eq 0)) {
 # Notes:
 #   - index.json uses versions in the form "vX.Y.Z"
 #   - We treat $Version as "X.Y.Z" and normalize it to "vX.Y.Z"
-#   - If no version was provided (or it wasn't found), we fall back to the first item
-#     which is typically the most recent release.
+#   - If no version was provided (or it wasn't found), we fall back to the latest LTS release.
 $requestedVersion = [string]::Empty
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
 
@@ -170,26 +170,36 @@ if (-not [string]::IsNullOrWhiteSpace($requestedVersion)) {
     Select-Object -First 1
 }
 
-# Fall back to latest release when no exact match was resolved.
+# Fall back to the latest LTS release when no exact match was resolved.
 #
 # Notes:
-#   - index.json is typically ordered newest -> oldest, so [0] is usually latest
+#   - index.json is ordered newest -> oldest and also lists pre-releases (for example v27.0.0-alpha builds) and
+#     Current releases; only an LTS release is a supported runtime for the sandbox
+#   - The 'lts' field is $false for non-LTS entries and the LTS line's code name (for example "Lithium") for LTS
+#     releases, so the first entry with a code name is the latest LTS; no version is pinned
+#   - The release must also ship a build for this platform
 if (-not $release) {
     if (-not [string]::IsNullOrWhiteSpace($requestedVersion)) {
-        Write-Host "Requested Node.js version not found: '$($requestedVersion)'. Falling back to latest release." -ForegroundColor Cyan
+        Write-Host "Requested Node.js version not found: '$($requestedVersion)'. Falling back to the latest LTS release." -ForegroundColor Cyan
     }
     else {
-        Write-Host "No Node.js version provided. Using latest release from index.json." -ForegroundColor Cyan
+        Write-Host "No Node.js version provided. Using the latest LTS release from index.json." -ForegroundColor Cyan
     }
 
     $release = $metadata |
-    Where-Object { $_.PSObject.Properties['files'] -and (@($_.files) -contains $indexFileKey) } |
+    Where-Object {
+        $isLtsRelease = $_.PSObject.Properties['lts'] -and ($_.lts -is [string]) -and -not [string]::IsNullOrWhiteSpace($_.lts)
+        $hasPlatformBuild = $_.PSObject.Properties['files'] -and (@($_.files) -contains $indexFileKey)
+        $isLtsRelease -and $hasPlatformBuild
+    } |
     Select-Object -First 1
 
     if (-not $release) {
-        Write-Warning "Node.js releases index has no release with a '$($indexFileKey)' build."
+        Write-Warning "Node.js releases index has no LTS release with a '$($indexFileKey)' build."
         return
     }
+
+    Write-Host "Resolved the latest Node.js LTS release: $($release.version) ($($release.lts))." -ForegroundColor Cyan
 }
 
 # Build the download URL for the selected OS and resolved version.
